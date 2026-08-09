@@ -256,19 +256,19 @@ most; it decides whether bnd is a correctness-viable mechanism at all.
 ## Recommendation
 
 **If converting the 9 wired `packaging=jar` modules to `packaging=bundle` — dropping the
-`-bundle` classifier karaf's `feature.xml` references — is acceptable:** adopt bnd, gated on
-testing bndlib ≥ 6.4.0. At 6.3.1 it is not shippable: `kubernetes-model-core` does not build,
-`uses` is unreachable, multi-release-jar `requires` names are wrong. If the pin fails those names
-need per-dependency `substitute=` — enumerable and central, since bnd's other wrong names should
-self-heal at rollout.
+karaf-referenced `-bundle` classifier — is acceptable:** adopt bnd, gated on testing bndlib ≥ 6.4.0.
+**bnd still reaches only 68/74; the last 6 need moditect or fresh OSGi wiring.** At 6.3.1 it is
+unshippable: `kubernetes-model-core` fails, `uses` is unreachable, multi-release-jar `requires`
+names are wrong. If the pin fails they need per-dependency `substitute=` — enumerable and central;
+bnd's other wrong names should self-heal at rollout.
 
-**If it is not acceptable:** bnd is capped at 59 of 74, missing all 9 artifacts consumers put on
-a module path. Use moditect for those 9; it is now measured to write plain `packaging=jar` main
-jars. Costs: ~74 name properties, the exclusion list, an uberjar skip, a dormant upstream.
+**If not:** bnd caps at 59 of 74, missing all 9 artifacts consumers put on a
+module path. Use moditect for those 9 — now measured to write plain `packaging=jar` main jars.
+Costs: closure-wide naming (~74 properties), the exclusion list, an uberjar skip, dormant upstream.
 
-**Strongest argument against:** bnd's defect ships. `requires jackson-core` fails at the
-consumer's module resolution after release; moditect's failures are loud, in CI. #7986 is a
-correctness report; I recommend the cheaper arm.
+**Strongest argument against:** bnd's defect ships. `requires jackson-core` fails at consumer
+module resolution after release; moditect's fail loudly in CI. #7986 is a correctness report;
+I recommend the cheaper arm.
 
 ## Everything marked "not measured"
 
