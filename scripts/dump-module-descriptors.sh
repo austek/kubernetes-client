@@ -20,8 +20,11 @@ while IFS= read -r jar; do
   echo "=== $(basename "$jar") ==="
   if unzip -l "$jar" | grep -qE ' module-info\.class$'; then
     echo "HAS module-info.class"
-    jar --describe-module --file="$jar" \
-      | { head -1; tail -n +2 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort; }
+    # Capture once: piping the same command's output into both `head` and
+    # `tail` races on the pipe buffer and silently drops the `tail` half.
+    mod_desc="$(jar --describe-module --file="$jar")"
+    printf '%s\n' "$mod_desc" | head -1
+    printf '%s\n' "$mod_desc" | tail -n +2 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort
   else
     # `jar --describe-module` exits non-zero when the filename cannot yield a
     # legal automatic module name (e.g. `-999-SNAPSHOT`). Record what it says
