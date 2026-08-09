@@ -1156,8 +1156,62 @@
                 <overwriteExistingFiles>true</overwriteExistingFiles>
                 <jdepsExtraArgs>
                   <arg>--multi-release</arg>
-                  <arg>11</arg>
+                  <arg>9</arg>
                 </jdepsExtraArgs>
+                <exclusions>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-core</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>builder-annotations</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-codegen-api</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-codegen-apt</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-model</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-model-base</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-model-repo</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-model-utils</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-adapter-api</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-adapter-apt</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>sundr-adapter-reflect</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>io.sundr</groupId>
+                    <artifactId>resourcecify-annotations</artifactId>
+                  </exclusion>
+                  <exclusion>
+                    <groupId>org.projectlombok</groupId>
+                    <artifactId>lombok</artifactId>
+                  </exclusion>
+                </exclusions>
                 <module>
                   <moduleInfo>
                     <name>${jpms.module.name}</name>

@@ -404,3 +404,183 @@ scope, and they carry the same "999-SNAPSHOT" version regardless of build order.
 most favorable full-install scenario achievable within this spike's scope, moditect's coverage
 of the 3 packaging=jar modules could not have been confirmed without ALSO naming ~20+ modules
 that are explicitly out of scope for this task.
+
+## Follow-up: bootstrap experiment (requested after initial review)
+
+The coordinator flagged that the 1/7 result above may be confounded by this spike's 7-module
+slice rather than being a property of moditect itself: zjsonpatch is the only slice module with
+no fabric8 compile dependency, so it is the only one immune to the "999-SNAPSHOT can't be named"
+problem. Two bounded experiments were run to test this, both against `kubernetes-model-core`
+(the cheapest case: exactly one compile-scope fabric8 dependency, kubernetes-model-common).
+
+### Experiment A: does bootstrapping one dependency's descriptor into ~/.m2 unblock its dependent?
+
+Added `<jpms.module.name>io.fabric8.kubernetes.model.common</jpms.module.name>` to
+kubernetes-model-common/pom.xml (same treatment as the other 7 modules), then installed only
+that one module (single-module install, not the prohibited full-reactor install):
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 | tail -20
+  ...
+  [ERROR] Modules sundr.model.utils and sundr.model.base export package io.sundr.model to module sundr.codegen.apt
+  [INFO] BUILD FAILURE
+
+This is NOT the naming problem — it's a genuine, different failure: a real split package inside
+the provided-scope Sundr toolchain (io.sundr.model shipped by both sundr-model-utils and
+sundr-model-base). This is exactly the #7911 issue the task brief's "known things that may go
+wrong" section anticipated, now actually reproduced. Excluding just the one colliding artifact
+via moditect's <exclusions> (List<org.apache.maven.model.Exclusion>, confirmed via javap on
+AddModuleInfoMojo.class) surfaced a second, independent split (io.sundr.builder, shipped by both
+builder-annotations and sundr-core):
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 | tail -10
+  ...
+  [ERROR] Modules builder.annotations and sundr.core export package io.sundr.builder to module sundr.codegen.apt
+
+Whack-a-mole exclusion was abandoned in favor of excluding the entire provided-scope Sundr/lombok
+closure at once (13 artifacts: sundr-core, builder-annotations, sundr-codegen-api,
+sundr-codegen-apt, sundr-model, sundr-model-base, sundr-model-repo, sundr-model-utils,
+sundr-adapter-api, sundr-adapter-apt, sundr-adapter-reflect, resourcecify-annotations, lombok —
+all inherited as <scope>provided</scope> from kubernetes-model-generator/pom.xml, confirmed by
+reading that pom directly). These are compile-time/annotation-processing-only dependencies not
+referenced by the compiled bytecode at runtme, so excluding them from moditect's own module-path
+computation (not from the real Maven dependency graph) is sound:
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 | tail -15
+  ...
+  [INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-model-common ---
+  [INFO] Running jdeps --generate-module-info .../kubernetes-model-common/target/moditect --add-modules com.fasterxml.jackson.databind,com.fasterxml.jackson.annotation,org.slf4j,com.fasterxml.jackson.core --module-path .../jackson-databind-2.21.4.jar:.../jackson-annotations-2.21.jar:.../slf4j-api-2.0.18.jar:.../jackson-core-2.21.4.jar --multi-release 9 .../kubernetes-model-common-999-SNAPSHOT.jar
+  writing to .../kubernetes-model-common/target/moditect/io.fabric8.kubernetes.model.common/versions/9/module-info.java
+  [INFO] Created module descriptor at .../kubernetes-model-common/target/moditect/generated-sources/io.fabric8.kubernetes.model.common/module-info.java
+  [INFO]
+  [INFO] --- install:3.1.4:install (default-install) @ kubernetes-model-common ---
+  [INFO] Installing .../kubernetes-model-common-999-SNAPSHOT.jar to /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar
+  [INFO] BUILD SUCCESS
+
+kubernetes-model-common now carries a real, correctly-named descriptor in ~/.m2. Rebuilding
+kubernetes-model-core alone (package, not install):
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests 2>&1 | tail -15
+  ...
+  [INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-model-core ---
+  [INFO] Running jdeps --generate-module-info .../kubernetes-model-core/target/moditect --add-modules io.fabric8.kubernetes.model.common,com.fasterxml.jackson.databind,com.fasterxml.jackson.annotation,org.slf4j,com.fasterxml.jackson.core --module-path /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar:.../jackson-databind-2.21.4.jar:.../jackson-annotations-2.21.jar:.../slf4j-api-2.0.18.jar:.../jackson-core-2.21.4.jar --multi-release 9 .../kubernetes-model-core-999-SNAPSHOT.jar
+  writing to .../kubernetes-model-core/target/moditect/io.fabric8.kubernetes.model.core/versions/9/module-info.java
+  [INFO] Created module descriptor at .../kubernetes-model-core/target/moditect/generated-sources/io.fabric8.kubernetes.model.core/module-info.java
+  [INFO] ------------------------------------------------------------------------
+  [INFO] BUILD SUCCESS
+
+**VERDICT: Experiment A succeeds unambiguously.** jdeps now correctly picks up
+`io.fabric8.kubernetes.model.common` — the real, dotted, legal name read from the freshly-
+installed descriptor — as a `requires`, not a filename-derived guess. Full descriptor dump:
+
+  $ ./scripts/dump-module-descriptors.sh kubernetes-model-generator/kubernetes-model-core/target/kubernetes-model-core-999-SNAPSHOT.jar
+  === kubernetes-model-core-999-SNAPSHOT.jar ===
+  HAS module-info.class
+  io.fabric8.kubernetes.model.core@999-SNAPSHOT jar:file:///.../kubernetes-model-core-999-SNAPSHOT.jar!/module-info.class open
+  exports io.fabric8.kubernetes.api
+  exports io.fabric8.kubernetes.api.model
+  exports io.fabric8.kubernetes.api.model.clusterapi.core.v1beta1
+  exports io.fabric8.kubernetes.api.model.runtime
+  exports io.fabric8.kubernetes.api.model.version
+  exports io.fabric8.kubernetes.internal
+  provides io.fabric8.kubernetes.api.model.KubernetesResource with io.fabric8.kubernetes.api.model.APIGroup [... 48 implementations, full list in /tmp/final-expA-descriptor.txt ...]
+  requires com.fasterxml.jackson.annotation
+  requires com.fasterxml.jackson.core
+  requires com.fasterxml.jackson.databind
+  requires io.fabric8.kubernetes.model.common
+  requires java.base mandated
+  uses io.fabric8.kubernetes.api.model.KubernetesResource
+
+Two additional points fall out of this same evidence:
+- **`requires io.fabric8.kubernetes.model.common` is objectively BETTER than what bnd produced**
+  for the identical dependency edge in this exact codebase (bnd's own committed result,
+  spike-results/10-bnd-bundle-modules.txt on spike/jpms-bnd, shows `requires
+  kubernetes-model-core transitive` — the raw, hyphenated, wrong guess — because bnd never
+  validates the name it writes). Once the closure resolves, moditect's requires are correct;
+  bnd's can be silently wrong even when the build succeeds.
+- **"provides for free" is now confirmed with a real, moditect-authored descriptor** (not the
+  JPMS automatic-module-synthesis caveat noted in the original Step 10 write-up): `provides
+  io.fabric8.kubernetes.api.model.KubernetesResource with ...` and `uses
+  io.fabric8.kubernetes.api.model.KubernetesResource` were both generated with zero register:-
+  equivalent configuration anywhere in this arm, directly from META-INF/services +
+  addServiceUses. This is a genuine point in this arm's favor versus the bnd arm's Task 4
+  register: work.
+
+**What this does NOT show**: this is one dependency edge (kubernetes-model-core →
+kubernetes-model-common), tested by installing exactly one extra, otherwise-out-of-scope module.
+It is evidence that the closure-resolution mechanism itself works correctly once every jar in it
+carries a real descriptor — not proof that all ~20 of kubernetes-client-api's out-of-scope
+kubernetes-model-* dependencies would install cleanly at full 74-module rollout. Each one may
+carry its own version of the Sundr split-package problem found here (most of them are generated
+by the same kubernetes-model-generator parent and inherit the identical provided-scope Sundr
+toolchain), and each would need the same 13-artifact exclusion list (or worse, if any has its own
+distinct split). openshift-model-config, which depends only on kubernetes-model-core, was
+re-tested unchanged and still fails exactly as before, because kubernetes-model-core itself was
+only packaged, not installed, in this experiment (deliberately, to keep the experiment to the
+single edge the coordinator asked about):
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model-config package -DskipTests 2>&1 | tail -8
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    /home/austek/.m2/repository/io/fabric8/kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+
+So the corrected picture is: **the 1/7 slice-scoped result, as measured under this task's exact
+constraints, stands** — but it is now known to be an artifact of the 7-module slice combined
+with the no-install constraint, not an inherent limit of jdeps/moditect. The mechanism bootstraps
+correctly, edge by edge, once every dependency in the closure has a real descriptor; the real,
+now-precisely-identified cost is that reaching that state requires resolving the same class of
+Sundr split-package problem (found here, previously only hypothesized from the brief) potentially
+many more times across the out-of-scope closure, at effort that scales with how many of that
+closure's modules turn out to hit it.
+
+### Experiment B: multi-release jar handling
+
+Checked the real location of Jackson's module-info before assuming a value:
+
+  $ unzip -l /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.21.4/jackson-databind-2.21.4.jar | grep "module-info"
+       1496  2026-05-28 21:20   META-INF/versions/9/module-info.class
+
+Confirmed for jackson-core too (identical layout, same command against jackson-core-2.21.4.jar,
+also versions/9). moditect's actual parameter (confirmed via javap on AddModuleInfoMojo.class) is
+`jdepsExtraArgs: List<String>` — a flat list of raw jdeps CLI tokens, which is what this arm was
+already using (`<jdepsExtraArgs><arg>--multi-release</arg><arg>N</arg></jdepsExtraArgs>`); no
+different element shape was needed.
+
+The arm's original value was `--multi-release 11` (chosen to match maven.compiler.release, not
+because 9 was known at the time). That already worked correctly, because multi-release JAR
+resolution picks the highest versioned override <= the requested release, and 9 <= 11. Changed
+to `--multi-release 9` — the actual, documented value — and re-verified both previously-passing
+cases produce byte-identical `requires` names:
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests 2>&1 | tail -8
+  ...
+  [INFO] BUILD SUCCESS
+
+  $ ./scripts/dump-module-descriptors.sh kubernetes-model-generator/kubernetes-model-core/target/kubernetes-model-core-999-SNAPSHOT.jar | grep -E "requires|module-info"
+  HAS module-info.class
+  io.fabric8.kubernetes.model.core@999-SNAPSHOT jar:file:///.../kubernetes-model-core-999-SNAPSHOT.jar!/module-info.class open
+  requires com.fasterxml.jackson.annotation
+  requires com.fasterxml.jackson.core
+  requires com.fasterxml.jackson.databind
+  requires io.fabric8.kubernetes.model.common
+  requires java.base mandated
+
+**VERDICT: no functional difference between 9 and 11 in this codebase** — both correctly resolve
+`com.fasterxml.jackson.core` / `com.fasterxml.jackson.databind` as proper dotted names read from
+the real embedded module-info, never a filename-derived guess. 9 is kept going forward as the
+precise, documented value rather than relying on the "9 <= 11" coincidence. Also re-verified
+zjsonpatch (the other module with a Jackson dependency) still builds clean under `--multi-release
+9`:
+
+  $ ./scripts/mvnj -pl zjsonpatch package -DskipTests 2>&1 | tail -8
+  [INFO] BUILD SUCCESS
+
+## Updated summary of measurements (supersedes the "1. Coverage" line above)
+
+1. Coverage across all 7 modules, as directly measured under this task's exact constraints:
+   still 1 of 7 verbatim (zjsonpatch). BUT: the bootstrap experiment above shows this is a
+   property of the 7-module slice plus the no-install constraint, not an inherent jdeps/moditect
+   limitation — kubernetes-model-core (a second module) is confirmed buildable once its one
+   out-of-scope dependency is installed with a real descriptor, correctly, with `provides`
+   included for free. Whether the remaining 5 (and the ~20 further out-of-scope modules
+   kubernetes-client-api depends on) would also bootstrap cleanly is not tested and should not be
+   assumed either way — each may hit its own Sundr-toolchain split package requiring its own
+   exclusion list, as kubernetes-model-common did here.

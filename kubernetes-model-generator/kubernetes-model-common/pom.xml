@@ -28,6 +28,10 @@
   <packaging>bundle</packaging>
   <name>Fabric8 :: Kubernetes Model :: Common</name>
 
+  <properties>
+    <jpms.module.name>io.fabric8.kubernetes.model.common</jpms.module.name>
+  </properties>
+
   <dependencies>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
