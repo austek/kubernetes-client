@@ -1,3 +1,12 @@
+NOTE ON FORMATTING: Maven prints several of the errors quoted in this file (in particular the
+"Failed to execute goal ... No assignedModuleName provided ..." lines) as one long unwrapped
+line. Throughout this file such lines are manually reflowed into indented multi-line blocks for
+readability. This reflowing is cosmetic only — it does not add, remove, or reorder any words —
+but it means those specific blocks are not literal terminal output character-for-character (line
+breaks would not appear at those points in a real terminal or when redirected to a file). Every
+other formatting convention in this file (truncation markers, command lines, etc.) is documented
+inline where it appears.
+
 Step 5: naming-problem proof
 =============================
 
@@ -161,26 +170,32 @@ installed back to ~/.m2 for sibling builds to see):
   $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests 2>&1 | tail -10
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     .../kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar
+  ...
 
   $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model-config package -DskipTests 2>&1 | tail -10
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     .../kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+  ...
 
   $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model package -DskipTests 2>&1 | tail -10
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     .../kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+  ...
 
   $ ./scripts/mvnj -pl kubernetes-client-api package -DskipTests 2>&1 | tail -10
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     .../kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+  ...
 
   $ ./scripts/mvnj -pl kubernetes-client package -DskipTests 2>&1 | tail -10
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     .../kubernetes-client-api/999-SNAPSHOT/kubernetes-client-api-999-SNAPSHOT.jar
+  ...
 
   $ ./scripts/mvnj -pl httpclient-jdk package -DskipTests 2>&1 | tail -10
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     .../kubernetes-client-api/999-SNAPSHOT/kubernetes-client-api-999-SNAPSHOT.jar
+  ...
 
 Investigated whether moditect's officially-supported mechanism for this (the <modules> list,
 which lets you give OTHER artifacts an assigned name) could fix it. It cannot, at reasonable
@@ -568,6 +583,7 @@ single edge the coordinator asked about):
   $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model-config package -DskipTests 2>&1 | tail -8
   [ERROR] ... No assignedModuleName provided for jar with invalid module name:
     /home/austek/.m2/repository/io/fabric8/kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+  ...
 
 So the corrected picture is: **the 1/7 slice-scoped result, as measured under this task's exact
 constraints, stands** — but it is now known to be an artifact of the 7-module slice combined
