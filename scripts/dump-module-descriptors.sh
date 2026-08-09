@@ -19,8 +19,10 @@ for jar in $(printf '%s\n' "$@" | sort -t/ -k99); do
       | { head -1; tail -n +2 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort; }
   else
     echo "NO module-info.class (automatic module)"
-    ./scripts/jdk-run jar --describe-module --file="$jar" 2>&1 \
-      | grep -E '@|automatic' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort || true
+    jar --describe-module --file="$jar" 2>&1 \
+      | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' \
+      | grep -v '^$' \
+      | sort || true
   fi
   echo
 done

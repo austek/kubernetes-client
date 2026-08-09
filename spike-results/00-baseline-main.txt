@@ -1,25 +1,42 @@
+Java derives an automatic module name from a jar's filename only after stripping a trailing version matched by -(\d+(\.|$)); in these SNAPSHOT builds the version segment is "999-SNAPSHOT", where 999 is followed by "-" rather than "." or end-of-string, so the version is never stripped and derivation fails outright ("Invalid module name: '999' is not a Java identifier"). At a real release version such as 7.9.0 the version would strip cleanly and these jars would instead become filename-derived automatic modules — the defect actually reported in issue #7986 — so this baseline captures a stricter failure mode of that same root cause, not a milder one.
+
 === kubernetes-httpclient-jdk-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+contains io.fabric8.kubernetes.client.jdkhttp
 io.fabric8.kubernetes.client.jdkhttp automatic
 No module descriptor found. Derived automatic module.
+provides io.fabric8.kubernetes.client.http.HttpClient$Factory with io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+requires java.base mandated
 
 === kubernetes-client-api-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+kubernetes.client.api.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+Unable to derive module descriptor for: kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT.jar
 
 === kubernetes-client-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+kubernetes.client.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+Unable to derive module descriptor for: kubernetes-client/target/kubernetes-client-999-SNAPSHOT.jar
 
 === kubernetes-model-core-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+kubernetes.model.core.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+Unable to derive module descriptor for: kubernetes-model-generator/kubernetes-model-core/target/kubernetes-model-core-999-SNAPSHOT.jar
 
 === openshift-model-config-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+openshift.model.config.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+Unable to derive module descriptor for: kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar
 
 === openshift-model-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+openshift.model.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+Unable to derive module descriptor for: kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar
 
 === zjsonpatch-999-SNAPSHOT.jar ===
 NO module-info.class (automatic module)
+Unable to derive module descriptor for: zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar
+zjsonpatch.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
 
 SPLIT io.fabric8.openshift.api.model.config.v1alpha2 openshift-model-999-SNAPSHOT.jar openshift-model-config-999-SNAPSHOT.jar
 SPLIT io.fabric8.openshift.api.model.config.v1 openshift-model-999-SNAPSHOT.jar openshift-model-config-999-SNAPSHOT.jar
