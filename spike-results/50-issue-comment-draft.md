@@ -1,6 +1,11 @@
-**DRAFT ONLY — NOT POSTED.** Two comments intended for
-https://github.com/fabric8io/kubernetes-client/issues/7986, awaiting review before posting.
+**DRAFT ONLY — NOT POSTED.** Three comments awaiting review before posting: two for
+https://github.com/fabric8io/kubernetes-client/issues/7986 and one for
+https://github.com/fabric8io/kubernetes-client/pull/7911.
 Everything above and below a `>>>` / `<<<` marker pair is scaffolding, not comment text.
+
+Suggested order: comment 1 on the issue first, then the PR comment (which references the issue).
+Comment 2 is better held until someone responds — #7986 is assigned to `ash-thakur-rh` and
+milestoned 8.0.0, so an unsolicited task breakdown may step on work that is now theirs.
 
 ---
 
@@ -38,7 +43,8 @@ Branches: [bnd](https://github.com/austek/kubernetes-client/tree/spike/jpms-bnd)
 
 >>> BEGIN COMMENT 2
 
-Follow-up tasks with acceptance criteria. 2-8 are sequenced behind the packaging decision above.
+Offering these as input in case they're useful to whoever picks this up. Follow-up tasks with
+acceptance criteria; 2-8 are sequenced behind the packaging decision above.
 
 1. Compare both mechanisms on a representative module slice and resolve the packaging question.
    AC: both arms build on JDK 11; `jar --describe-module` captured per arm and diffed against
@@ -72,3 +78,23 @@ Follow-up tasks with acceptance criteria. 2-8 are sequenced behind the packaging
    lands, not after.
 
 <<< END COMMENT 2
+
+---
+
+**Comment for PR #7911 — separate thread, post after comment 1 is on the issue**
+
+>>> BEGIN PR COMMENT
+
+The automation question behind this PR is now investigated in #7986: bnd's `-jpms-module-info`
+compared against moditect's `add-module-info` on a 7-module slice of the real build, with the
+measurements and the remaining open questions linked from there.
+
+Both mechanisms generate descriptors rather than hand-maintaining them, so this PR's approach is
+superseded either way. Happy to close it.
+
+Two changes in here are worth keeping regardless of which mechanism wins, since they are real
+defects independent of the choice: the `openshift-model` / `openshift-model-config` split package,
+and moving `Fabric8ClientInjectionHandler` out of the package it shares with `kube-api-test`. I can
+open a separate PR for just those if that's useful.
+
+<<< END PR COMMENT
