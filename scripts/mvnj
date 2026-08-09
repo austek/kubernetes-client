@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ./scripts/mvnj under a pinned JDK. Usage: ./scripts/mvnj <maven args>...
+#   SPIKE_JDK=11 ./scripts/mvnj -pl zjsonpatch package -DskipTests
+set -euo pipefail
+cd "$(dirname "$0")/.."
+. scripts/jdk-select.sh
+echo "[mvnj] JAVA_HOME=$JAVA_HOME" >&2
+exec ./mvnw "$@"

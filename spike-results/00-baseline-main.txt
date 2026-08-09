@@ -1,0 +1,25 @@
+=== kubernetes-httpclient-jdk-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+io.fabric8.kubernetes.client.jdkhttp automatic
+No module descriptor found. Derived automatic module.
+
+=== kubernetes-client-api-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+
+=== kubernetes-client-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+
+=== kubernetes-model-core-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+
+=== openshift-model-config-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+
+=== openshift-model-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+
+=== zjsonpatch-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+
+SPLIT io.fabric8.openshift.api.model.config.v1alpha2 openshift-model-999-SNAPSHOT.jar openshift-model-config-999-SNAPSHOT.jar
+SPLIT io.fabric8.openshift.api.model.config.v1 openshift-model-999-SNAPSHOT.jar openshift-model-config-999-SNAPSHOT.jar

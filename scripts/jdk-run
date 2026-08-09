@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Any command under a pinned JDK. Usage: ./scripts/jdk-run jar --describe-module --file=x.jar
+set -euo pipefail
+. "$(dirname "$0")/jdk-select.sh"
+exec "$@"
