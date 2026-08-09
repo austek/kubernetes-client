@@ -31,6 +31,7 @@
   <name>Fabric8 :: OpenShift Model :: Config</name>
 
   <properties>
+    <jpms.module.name>io.fabric8.openshift.model.config</jpms.module.name>
     <clone-kube>true</clone-kube>
     <osgi.import>*</osgi.import>
     <osgi.export>

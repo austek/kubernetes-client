@@ -29,6 +29,7 @@
   <name>Fabric8 :: Kubernetes :: Java Client</name>
 
   <properties>
+    <jpms.module.name>io.fabric8.kubernetes.client</jpms.module.name>
     <osgi.require-capability>
       osgi.extender;
       filter:="(osgi.extender=osgi.serviceloader.processor)",

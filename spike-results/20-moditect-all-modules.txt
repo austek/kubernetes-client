@@ -1,0 +1,406 @@
+Step 5: naming-problem proof
+=============================
+
+Deliberately-wrong central property: <jpms.module.name>io.fabric8.${project.artifactId}</jpms.module.name>
+
+$ ./scripts/mvnj -pl zjsonpatch package -DskipTests 2>&1 | tail -30
+...
+[INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ zjsonpatch ---
+[ERROR] jackson-core-2.21.4.jar is a multi-release jar file but --multi-release option is not set
+[INFO] BUILD FAILURE
+[ERROR] Failed to execute goal org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info
+  (add-module-info) on project zjsonpatch: Execution add-module-info of goal
+  org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info failed: Invocation of jdeps
+  failed: jdeps --generate-module-info ... -> [Help 1]
+
+Unanticipated failure mode before the naming problem could even be tested: jdeps refuses to run
+against jackson-core 2.21.4, a multi-release jar, unless told which release to select. Fixed by
+adding to the shared pluginManagement configuration:
+
+  <jdepsExtraArgs>
+    <arg>--multi-release</arg>
+    <arg>11</arg>
+  </jdepsExtraArgs>
+
+This is a legitimate, narrow workaround (matches the project's maven.compiler.release=11), not a
+change to the naming behavior under test. With it applied, zjsonpatch's artifactId happens to
+contain no hyphen, so the deliberately-wrong property evaluates to the legal name
+"io.fabric8.zjsonpatch" and the build succeeds — matching the brief's anticipated "either a
+failure or a descriptor named io.fabric8.zjsonpatch" outcome (the legal branch).
+
+$ ./scripts/mvnj -pl kubernetes-client-api package -DskipTests 2>&1 | tail -30
+...
+[INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-client-api ---
+[ERROR] Failed to execute goal org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info
+  (add-module-info) on project kubernetes-client-api: Execution add-module-info of goal
+  org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info failed: No assignedModuleName
+  provided for jar with invalid module name:
+  /home/austek/.m2/repository/io/fabric8/kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+  -> [Help 1]
+
+Confirms the naming problem, but the illegal name that trips the build is not
+"io.fabric8.kubernetes-client-api" itself (that module is never reached) — it is
+kubernetes-model-core, a DEPENDENCY, still carrying the same wrong central default at the point
+this was captured. Same root cause (Maven cannot string-replace in property interpolation), one
+hop earlier than the brief predicted. This foreshadows the much larger dependency-naming problem
+documented under "Edge case findings" below.
+
+Step 6: per-module property fix and cost count
+=================================================
+
+Fixed by adding an explicit <jpms.module.name> to each slice module's own <properties>:
+
+  zjsonpatch/pom.xml:                                          io.fabric8.zjsonpatch
+  kubernetes-model-generator/kubernetes-model-core/pom.xml:    io.fabric8.kubernetes.model.core
+  kubernetes-model-generator/openshift-model/pom.xml:          io.fabric8.openshift.model
+  kubernetes-model-generator/openshift-model-config/pom.xml:   io.fabric8.openshift.model.config
+  kubernetes-client-api/pom.xml:                               io.fabric8.kubernetes.client.api
+  kubernetes-client/pom.xml:                                   io.fabric8.kubernetes.client
+  httpclient-jdk/pom.xml:                                      io.fabric8.kubernetes.client.jdkhttp (pre-existing, unchanged)
+
+moditect requires 6 new per-module property lines (one per module, the 7th — httpclient-jdk —
+already had it on main). At full 74-module scale this is 74 per-module property lines (minus
+whatever already carry one, by analogy with httpclient-jdk); bnd requires 5 (the frozen
+httpclient names only), because bnd has a ${replace;...} macro that moditect has no equivalent
+of. No build-helper or Maven-extension alternative was found or attempted; Maven property
+interpolation has no string-replace primitive, full stop.
+
+Step 7: aggregator/excluded-module cost
+==========================================
+
+$ ./scripts/mvnj -pl kubernetes-model-generator package -DskipTests 2>&1 | tail -20
+...
+[INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-model-generator ---
+[INFO] BUILD SUCCESS
+
+0 poms needed <moditect.skip> handling. Activating the plugin in the inherited <build><plugins>
+does reach packaging=pom aggregators, as the brief warned, but moditect's add-module-info goal
+silently no-ops when there is no primary jar artifact to transform — no failure, no warning, no
+skip configuration required. This is a point in this arm's favor versus what the brief
+anticipated (it predicted a likely failure requiring a <moditect.skip> property plumbed through
+every aggregator pom; that plumbing was not needed).
+
+Step 8: split-package exclusion (same edit as bnd Task 2 Step 6)
+====================================================================
+
+Applied to kubernetes-model-generator/openshift-model/pom.xml (identical diff to the bnd arm):
+
+  <osgi.export>
+    <!-- config.* lives in openshift-model-config; exclude or JPMS sees a split package. -->
+    !io.fabric8.openshift.api.model.config,
+    !io.fabric8.openshift.api.model.config.*,
+    io.fabric8.openshift.api.model**,
+    io.fabric8.openshift.api.model.customresourcestatus.conditions.v1**,
+  </osgi.export>
+
+$ ./scripts/scan-split-packages.sh \
+    kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar \
+    kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar
+OK no split packages
+
+IMPORTANT CAVEAT: this result does not actually test "does moditect honour osgi.export" — see
+"Edge case findings" below. Both openshift-model's and openshift-model-config's builds failed
+before moditect ever ran jdeps on them (neither jar has a module descriptor, real or automatic),
+so no exports clause was ever generated by moditect for either jar to check against the
+exclusion. What scan-split-packages.sh actually measured here is that the two jars' RAW CLASS
+FILES never physically overlapped in the first place:
+
+  $ unzip -l kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar | grep -c "api/model/config"
+  0
+
+openshift-model.jar contains zero io.fabric8.openshift.api.model.config.* class files. The split
+risk the bnd arm's Step 6 fix addressed was specific to BND'S WILDCARD Export-Package pattern
+("io.fabric8.openshift.api.model**", a double-wildcard that matches the config.* sub-package
+declaratively even though no such classes are physically present) — a bnd-specific
+over-claiming risk, not a literal JPMS split package. jdeps computes `exports` strictly from
+packages it can see class files for in the target jar; it has no equivalent wildcarded
+declarative Export-Package syntax that could over-claim a namespace. So this specific species of
+risk is structurally inapplicable to the jdeps-based mechanism — not because moditect "honours"
+osgi.export (it does not read it at all, confirmed: osgi.export is bnd/OSGi-only metadata), but
+because jdeps never had a mechanism to make the mistake bnd's wildcard could make. Whether
+moditect would honour a REAL split package (two jars both physically containing the identical
+package) remains untested here, because no such real physical split exists between these two
+modules to test against.
+
+Step 9: build all 7 slice modules and capture descriptors
+=============================================================
+
+HEADLINE FINDING — directly contradicts the brief's anticipated central advantage:
+
+Only 1 of 7 modules (zjsonpatch) produced a real module descriptor. The other 6 all failed with
+BUILD FAILURE, every one on the identical root cause: jdeps requires every jar it places on its
+module path — not just the 7 modules in scope for this task, but the ENTIRE transitive
+dependency closure, including non-target reactor siblings — to resolve to a legal automatic
+module name. This project's dependencies in this reactor are all versioned "999-SNAPSHOT" (this
+is the actual current dev version on main, not a spike artifact — see pom.xml line 26). The JPMS
+automatic-module-name algorithm's version-stripping regex only recognizes a purely numeric
+dotted-decimal version suffix; "999-SNAPSHOT" is not purely numeric (the "-SNAPSHOT" tail is not
+digits), so the regex anchor fails, no stripping happens, and "999" and "SNAPSHOT" leak into the
+derived module name as literal segments — producing an illegal name because a segment cannot
+start with a digit:
+
+  $ ./scripts/jdk-run jar --describe-module --file=.../kubernetes-model-common-999-SNAPSHOT.jar
+  Unable to derive module descriptor for: .../kubernetes-model-common-999-SNAPSHOT.jar
+  kubernetes.model.common.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+Every one of the 6 failing modules depends, directly or transitively, on at least one artifact
+that is neither one of our 7 explicitly-named target modules nor a real JPMS module already
+(most fabric8 kubernetes-model-* submodules, httpclient-vertx, and — under this harness's
+`-pl <module>` without `-am` and without a fresh `install`, per the task's explicit constraint —
+even OTHER target modules, since their freshly-generated descriptors in target/ are never
+installed back to ~/.m2 for sibling builds to see):
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests 2>&1 | tail -10
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    .../kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model-config package -DskipTests 2>&1 | tail -10
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    .../kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model package -DskipTests 2>&1 | tail -10
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    .../kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+
+  $ ./scripts/mvnj -pl kubernetes-client-api package -DskipTests 2>&1 | tail -10
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    .../kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar
+
+  $ ./scripts/mvnj -pl kubernetes-client package -DskipTests 2>&1 | tail -10
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    .../kubernetes-client-api/999-SNAPSHOT/kubernetes-client-api-999-SNAPSHOT.jar
+
+  $ ./scripts/mvnj -pl httpclient-jdk package -DskipTests 2>&1 | tail -10
+  [ERROR] ... No assignedModuleName provided for jar with invalid module name:
+    .../kubernetes-client-api/999-SNAPSHOT/kubernetes-client-api-999-SNAPSHOT.jar
+
+Investigated whether moditect's officially-supported mechanism for this (the <modules> list,
+which lets you give OTHER artifacts an assigned name) could fix it. It cannot, at reasonable
+spike scope:
+
+  1. A shared/inherited <modules> list (in pluginManagement, applied to every module) backfires:
+     moditect processes EVERY listed entry unconditionally on EVERY build using this plugin
+     instance, regardless of relevance to the module actually being built. Adding zjsonpatch's
+     mapping to the shared list caused kubernetes-model-core's (unrelated) build to fail trying
+     to jdeps-analyze zjsonpatch in isolation, without zjsonpatch's own jackson dependencies
+     available in that isolated invocation.
+  2. Scoping the mapping down to a single, directly-relevant entry (kubernetes-model-common, for
+     kubernetes-model-core) still fails: the <modules> list runs jdeps on kubernetes-model-common
+     TOTALLY WITHOUT any of ITS OWN dependencies resolved (no jackson-databind, no slf4j-api) —
+     the primary module's own resolved compile+runtime classpath is not shared with entries in
+     this list.
+  3. Explicitly replicating kubernetes-model-common's own transitive dependencies via each
+     <module>'s <additionalDependencies> (jackson-databind, jackson-annotations, jackson-core,
+     slf4j-api, each with an explicit <version>, since Maven property-managed versions are not
+     inherited into this config either) DOES make moditect successfully generate a standalone
+     descriptor for kubernetes-model-common as an independent side-artifact. But it does not fix
+     the original build: kubernetes-model-core's OWN dependency-resolution pass for ITS OWN
+     <module> (the primary artifact) is a SEPARATE code path that does not consult the <modules>
+     list's assigned names at all — it re-derives kubernetes-model-common's name itself, hits
+     the identical "999-SNAPSHOT" failure, and the build fails at the exact same point:
+
+       [ERROR] Unable to derive module descriptor for
+         .../kubernetes-model-common-999-SNAPSHOT.jar: kubernetes.model.common.999.SNAPSHOT:
+         Invalid module name: '999' is not a Java identifier
+
+  There is no supported moditect mechanism, within the add-module-info goal, to say "treat
+  dependency X as module Y for the purpose of resolving MY OWN requires." The only way to make
+  this work is for X to actually carry a real module-info in ~/.m2 — i.e. a fully-ordered
+  `mvn install` across the whole affected dependency graph, which this task's constraints
+  explicitly prohibit ("Do not add -am and do not run a full install"). Even if that constraint
+  were lifted, it would only fix chains among modules THIS spike targets (kubernetes-model-core →
+  openshift-model, kubernetes-client-api → kubernetes-client/httpclient-jdk); it would not fix
+  kubernetes-client-api's ~20 non-target kubernetes-model-* siblings (gatewayapi, resource,
+  rbac, admissionregistration, apps, autoscaling, apiextensions, batch, certificates,
+  coordination, discovery, events, extensions, flowcontrol, networking, metrics, policy,
+  scheduling, storageclass, node), none of which are ever given real module-info in this spike's
+  scope and all of which carry the same "999-SNAPSHOT" version.
+
+Contrast with the bnd arm (verified against its actual committed results, spike-results/
+10-bnd-bundle-modules.txt and 11-bnd-packaging-gap.txt on branch spike/jpms-bnd): bnd ALSO could
+not resolve kubernetes-model-core's real name for its dependents (it never got a correct one
+either, and for kubernetes-model-core specifically bnd hit an unrelated NPE crash of its own).
+bnd's generated `requires kubernetes-model-common transitive`, `requires kubernetes-model-core
+transitive`, etc. use the raw, hyphenated Maven artifactId — objectively an equally WRONG module
+name. But bnd's build did not fail on it. bnd's Import-Package-derived manifest generation is a
+purely declarative, single-module analysis: it writes a `requires` clause referencing whatever
+name it can guess, without ever validating that name against a real, resolvable module path.
+jdeps is not declarative — `--generate-module-info` requires every jar it is given to already
+resolve to a legally-named module (real or automatic) before it will run at all, or it refuses to
+run for the whole invocation. This is the decisive structural difference this task exists to
+surface: bnd fails soft (wrong name, non-fatal); moditect/jdeps fails hard (no output at all) on
+the exact same underlying condition (999-SNAPSHOT dependency naming).
+
+Descriptor dump for the one module that did succeed, and the accurate "no descriptor" record for
+the other six (exact output of ./scripts/dump-module-descriptors.sh on all 7 jars — all 7 target
+jars exist on disk, since the underlying jar/bundle goal completes before moditect's
+add-module-info step runs and fails):
+
+=== kubernetes-client-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-client/target/kubernetes-client-999-SNAPSHOT.jar
+kubernetes.client.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== kubernetes-client-api-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT.jar
+kubernetes.client.api.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== kubernetes-httpclient-jdk-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+No module descriptor found. Derived automatic module.
+contains io.fabric8.kubernetes.client.jdkhttp
+io.fabric8.kubernetes.client.jdkhttp automatic
+provides io.fabric8.kubernetes.client.http.HttpClient$Factory with io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+requires java.base mandated
+
+=== kubernetes-model-core-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-model-generator/kubernetes-model-core/target/kubernetes-model-core-999-SNAPSHOT.jar
+kubernetes.model.core.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== openshift-model-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar
+openshift.model.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== openshift-model-config-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar
+openshift.model.config.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== zjsonpatch-999-SNAPSHOT.jar ===
+HAS module-info.class
+io.fabric8.zjsonpatch@999-SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar!/module-info.class open
+exports io.fabric8.zjsonpatch
+exports io.fabric8.zjsonpatch.internal.collections4
+requires com.fasterxml.jackson.core
+requires com.fasterxml.jackson.databind
+requires java.base mandated
+
+Note: kubernetes-httpclient-jdk's "Invalid module name" absence here (it gets a synthesized
+automatic-module view with `contains`/`provides`/`requires` instead of an error) is a general
+`jar --describe-module` display quirk unrelated to which arm generated (or failed to generate)
+the descriptor — the bnd arm's own Task 3 report (spike-results/11-bnd-packaging-gap.txt) shows
+the identical asymmetry for its plain, non-bundle-classified kubernetes-httpclient-jdk jar. Not a
+moditect-specific finding.
+
+Also worth recording precisely: three of the seven target modules ARE packaging=jar
+(kubernetes-client-api, kubernetes-client, httpclient-jdk). Confirming the brief's headline
+question directly: the ONE module that succeeded (zjsonpatch) is packaging=bundle, not
+packaging=jar, so this run could not demonstrate the claimed "moditect post-processes the main
+jar regardless of packaging" advantage on ANY packaging=jar module — all three failed, for the
+dependency-naming reason above, unrelated to their packaging. Whether moditect would in fact
+write into the plain packaging=jar main artifact (rather than a "-bundle" classified side
+artifact, which is bnd's gap) remains structurally plausible from how the plugin is wired
+(overwriteExistingFiles targets project.build.finalName's own output jar, not a classified one),
+but is NOT empirically confirmed here, because none of the three packaging=jar modules ever
+reached a successful add-module-info execution.
+
+## Edge case findings
+
+### jdeps vs the provided-scope sundr toolchain (why #7911 fell back to moduleInfoSource)
+
+$ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests -X 2>&1 \
+    | grep -iE 'jdeps|split package|sundr' | sort -u | head -30
+[DEBUG] collecting Contracts  from sundr-adapter-api
+[DEBUG] collecting Contracts  from sundr-adapter-apt
+[DEBUG] collecting Contracts  from sundr-adapter-reflect
+[DEBUG] collecting Contracts  from sundr-codegen-api
+[DEBUG] collecting Contracts  from sundr-codegen-apt
+[DEBUG] collecting Contracts  from sundr-core
+[DEBUG] collecting Contracts  from sundr-model
+[DEBUG] collecting Contracts  from sundr-model-base
+[DEBUG] collecting Contracts  from sundr-model-repo
+[DEBUG] collecting Contracts  from sundr-model-utils
+[DEBUG]   (f) jdepsExtraArgs = [--multi-release, 11]
+[DEBUG]    io.sundr:builder-annotations:jar:0.230.2:provided (exclusions managed from [com.sun:tools:*:*])
+[DEBUG]       io.sundr:resourcecify-annotations:jar:0.230.2:provided
+[DEBUG]          io.sundr:sundr-adapter-api:jar:0.230.2:provided
+[DEBUG]          io.sundr:sundr-adapter-apt:jar:0.230.2:provided
+[DEBUG]       io.sundr:sundr-adapter-reflect:jar:0.230.2:provided
+[DEBUG]          io.sundr:sundr-codegen-apt:jar:0.230.2:provided
+
+Could NOT be tested. The Sundrio provided-scope split-package issue that #7911 hit is real
+(the sundr-* jars are visibly present on the provided-scope compilePath, confirmed above), but
+this build never got far enough to reach jdeps's own split-package analysis of them — it fails
+earlier, on the kubernetes-model-common naming problem, before jdeps is even invoked for
+kubernetes-model-core's own module-info generation. Zero occurrences of "split package" in the
+full debug log. Whether jdeps would additionally choke on the Sundrio split package, on top of
+the naming problem, is unknown; the naming problem alone is already fatal and unresolved.
+
+### Split package after the osgi.export fix
+
+See Step 8 above for the full analysis: "OK no split packages", but the result reflects genuine
+absence of physical class-file overlap, not moditect honouring (or even attempting to read)
+osgi.export — moditect never got a descriptor far enough along to test the exclusion against.
+
+### Internal packages leaked into exports
+
+$ ./scripts/jdk-run jar --describe-module --file=kubernetes-client/target/kubernetes-client-999-SNAPSHOT.jar
+Unable to derive module descriptor for: .../kubernetes-client-999-SNAPSHOT.jar
+kubernetes.client.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+Not measurable. kubernetes-client never produced a module-info (real or automatic-with-contains)
+because its build failed on kubernetes-client-api's invalid dependency name, and even the
+`jar --describe-module` fallback view fails outright for this specific jar's own filename (unlike
+httpclient-jdk's, which happens to parse). The exports/internal-impl grep against this jar
+correctly returns nothing — there is nothing to grep. Cannot confirm or deny an export-leak cost
+for this arm from direct evidence; expected, from jdeps's documented default behavior (export
+every package unconditionally), to be present if the build had succeeded, but not verified here.
+
+### provides clauses without any register: directive
+
+$ ./scripts/jdk-run jar --describe-module --file=httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT.jar \
+    | grep -E 'provides|uses'
+provides io.fabric8.kubernetes.client.http.HttpClient$Factory with io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+
+A provides clause IS present, with zero register:-equivalent configuration added anywhere in
+this arm — matching the brief's "provides for free" hypothesis on its face. BUT this specific
+result must be read carefully: httpclient-jdk's own moditect build ALSO failed (same
+kubernetes-client-api naming problem as everything else), so this is NOT a moditect-generated
+module-info. It is the JDK's own `jar --describe-module` AUTOMATIC-MODULE synthesis — a standard
+JPMS feature that derives a synthetic `provides` clause from META-INF/services for ANY
+non-modular jar, independent of moditect, bnd, or any other tool. This is genuine and correct
+evidence that META-INF/services-derived provides clauses are available "for free" at the JPMS
+level generally, but it does NOT confirm moditect specifically would emit the same thing inside a
+REAL, explicit module-info.class with zero register:-equivalent work — that remains an untested,
+plausible-but-unverified hypothesis in this codebase, because no module in this arm with a
+META-INF/services provider ever got a real moditect-authored descriptor. (zjsonpatch, the one
+module that did succeed, has no META-INF/services entries to test against.)
+
+## Summary of measurements requested by the task brief
+
+1. Coverage across all 7 modules: NO — 1 of 7 (zjsonpatch only). The 3 packaging=jar modules
+   (kubernetes-client-api, kubernetes-client, httpclient-jdk) all failed, so the claimed
+   "moditect covers packaging=jar modules where bnd does not" advantage is NOT demonstrated by
+   this run — the coverage gap here is worse than bnd's, not better, under the harness's exact
+   constraints (see caveat below).
+2. Per-module naming cost: 6 new <jpms.module.name> lines added (7th was pre-existing), vs bnd's
+   5. At full 74-module scale: ~74 lines for moditect (minus whatever already carry one) vs 5 for
+   bnd. But this undercounts the true cost for moditect: it additionally requires the ENTIRE
+   non-target transitive dependency closure to resolve to a legal module name before jdeps will
+   run at all — a cost with no bnd equivalent, and the actual reason 6 of 7 builds failed outright.
+3. Aggregator/skip cost: 0 poms needed <moditect.skip> — better than the brief anticipated.
+4. Does moditect honour osgi.export: could not be tested — no descriptor was ever generated for
+   the module pair in question. Structurally, jdeps's exports-from-physical-contents design means
+   it cannot make the specific over-claiming mistake the bnd fix addressed, regardless.
+5. provides for free: plausible and consistent with moditect's documented design, but not
+   empirically confirmed in this codebase — the one module with a ServiceLoader provider
+   (httpclient-jdk) never got a real moditect-generated descriptor either.
+
+CAVEAT on finding 1: this specific coverage failure is a direct consequence of the interaction
+between the harness's required methodology (`-pl <module>` without `-am`, no fresh `install`,
+per this task's explicit constraints) and jdeps's strict module-path validation, compounded by
+this project's "999-SNAPSHOT" dev-version convention. A full, dependency-ordered `mvn install`
+would likely resolve the failures caused purely by OTHER TARGET modules lacking their own
+freshly-generated descriptor (kubernetes-model-core → openshift-model/openshift-model-config,
+kubernetes-client-api → kubernetes-client/httpclient-jdk) — this was not tested, since the task
+explicitly prohibits `-am` and a full install, to keep ~/.m2 stable and comparable across arms.
+It would NOT resolve the failures caused by genuinely out-of-scope siblings (kubernetes-model-
+common, kubernetes-model-rbac, and ~20 more kubernetes-model-* artifacts kubernetes-client-api
+depends on), since none of those are ever given a real module-info within this spike's 7-module
+scope, and they carry the same "999-SNAPSHOT" version regardless of build order. Even under the
+most favorable full-install scenario achievable within this spike's scope, moditect's coverage
+of the 3 packaging=jar modules could not have been confirmed without ALSO naming ~20+ modules
+that are explicitly out of scope for this task.
