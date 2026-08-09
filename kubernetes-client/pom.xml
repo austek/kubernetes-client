@@ -35,7 +35,17 @@
     </osgi.require-capability>
     <osgi.provide-capability>
       osgi.serviceloader;
-      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromEnvVarsImpl,
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromIngressImpl,
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromNodePortImpl,
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromClusterIPImpl
     </osgi.provide-capability>
     <osgi.import>
       !android.util*,

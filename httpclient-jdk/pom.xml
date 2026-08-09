@@ -36,7 +36,8 @@
     </osgi.require-capability>
     <osgi.provide-capability>
       osgi.serviceloader;
-      osgi.serviceloader=io.fabric8.kubernetes.client.http.HttpClient$Factory
+      osgi.serviceloader=io.fabric8.kubernetes.client.http.HttpClient$Factory;
+      register:=io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
     </osgi.provide-capability>
     <osgi.import>
       !android.util*,

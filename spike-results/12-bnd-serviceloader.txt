@@ -1,0 +1,308 @@
+Task 4: bnd arm — close the ServiceLoader `provides` gap
+==========================================================
+
+## Step 1: Confirm `provides` is currently absent (before state)
+
+$ ./scripts/jdk-run jar --describe-module --file=httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar | grep -c provides || echo "0 provides clauses"
+0
+0 provides clauses
+
+(grep -c prints the match count "0" and exits 1 because there were no matches, which
+triggers the `||` fallback, printing the second line too. Both lines are the literal
+output of the exact command in the brief.)
+
+Full `jar --describe-module` output before the pom change (for context):
+
+io.fabric8.kubernetes.client.jdkhttp@999.0.0.SNAPSHOT jar:file:///.../httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar!/module-info.class open
+exports io.fabric8.kubernetes.client.jdkhttp
+requires java.base
+requires java.net.http
+requires kubernetes-client-api transitive
+requires slf4j-api
+
+No `provides` and no `uses` clause anywhere in the descriptor. This confirms the gap:
+`grep -rn 'register:' --include=pom.xml .` returns 0 hits repo-wide, and without
+`register:` bnd's Provide-Capability osgi.serviceloader clause never turns into a
+`provides` entry in module-info.
+
+## Step 2: Added `register:` to httpclient-jdk/pom.xml
+
+Before:
+    <osgi.provide-capability>
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.http.HttpClient$Factory
+    </osgi.provide-capability>
+
+After:
+    <osgi.provide-capability>
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.http.HttpClient$Factory;
+      register:=io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+    </osgi.provide-capability>
+
+Implementation class taken verbatim from
+httpclient-jdk/src/main/resources/META-INF/services/io.fabric8.kubernetes.client.http.HttpClient$Factory,
+whose sole content line is:
+io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+
+## Step 3: Rebuild httpclient-jdk and verify the nested-class service
+
+$ ./scripts/mvnj -pl httpclient-jdk package -DskipTests 2>&1 | tee /tmp/step3-build.log | tail -30
+[INFO] Nothing to compile - all classes are up to date.
+[INFO]
+[INFO] --- jandex:3.6.0:jandex (make-index) @ kubernetes-httpclient-jdk ---
+[INFO] Saving Jandex index: .../httpclient-jdk/target/classes/META-INF/jandex.idx
+[INFO]
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ kubernetes-httpclient-jdk ---
+[INFO] skip non existing resourceDirectory .../httpclient-jdk/src/test/resources
+[INFO]
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ kubernetes-httpclient-jdk ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO]
+[INFO] --- surefire:3.5.6:test (default-test) @ kubernetes-httpclient-jdk ---
+[INFO] Tests are skipped.
+[INFO]
+[INFO] --- surefire:3.5.6:test (simultaneous-connections-test) @ kubernetes-httpclient-jdk ---
+[INFO] Tests are skipped.
+[INFO]
+[INFO] --- jar:3.5.1:jar (default-jar) @ kubernetes-httpclient-jdk ---
+[INFO] Building jar: .../httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT.jar
+[INFO]
+[INFO] --- bundle:5.1.9:bundle (bundle) @ kubernetes-httpclient-jdk ---
+[WARNING] Include-Resource: overriding META-INF/services/io.fabric8.kubernetes.client.http.HttpClient$Factory=src/main/resources/META-INF/services/io.fabric8.kubernetes.client.http.HttpClient$Factory with /META-INF/services/io.fabric8.kubernetes.client.http.HttpClient$Factory=target/classes/META-INF/services/io.fabric8.kubernetes.client.http.HttpClient$Factory, (add {maven-resources} if you want to include the maven resources)
+[INFO] Building bundle: .../httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar
+[INFO] Writing manifest: .../httpclient-jdk/target/classes/META-INF/MANIFEST.MF
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.402 s
+[INFO] Finished at: 2026-08-09T06:32:28+01:00
+[INFO] ------------------------------------------------------------------------
+
+$ ./scripts/jdk-run jar --describe-module --file=httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar | tee /tmp/step3-describe.log | grep -E 'provides|uses'
+provides io.fabric8.kubernetes.client.http.HttpClient$Factory with io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+
+RESULT: matches the expected clause exactly, character for character, including the `$`
+in `HttpClient$Factory`. No mangling — no `.` substituted for `$`, no flattening of the
+nested type. Spec edge case 4 (nested service interface) is emitted correctly by bnd
+6.3.1 for this module. No `uses` clause was emitted for this module (httpclient-jdk has
+no osgi.require-capability naming osgi.serviceloader, so none was expected).
+
+## Step 4: Added four `register:` clauses to kubernetes-client/pom.xml
+
+Before:
+    <osgi.provide-capability>
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider
+    </osgi.provide-capability>
+
+After:
+    <osgi.provide-capability>
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromEnvVarsImpl,
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromIngressImpl,
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromNodePortImpl,
+      osgi.serviceloader;
+      osgi.serviceloader=io.fabric8.kubernetes.client.ServiceToURLProvider;
+      register:=io.fabric8.kubernetes.client.impl.URLFromClusterIPImpl
+    </osgi.provide-capability>
+
+There was no other pre-existing content in this property beyond the single
+osgi.serviceloader clause shown above, so nothing else needed to be preserved.
+Implementation classes taken verbatim from
+kubernetes-client/src/main/resources/META-INF/services/io.fabric8.kubernetes.client.ServiceToURLProvider,
+whose four content lines are:
+io.fabric8.kubernetes.client.impl.URLFromEnvVarsImpl
+io.fabric8.kubernetes.client.impl.URLFromIngressImpl
+io.fabric8.kubernetes.client.impl.URLFromNodePortImpl
+io.fabric8.kubernetes.client.impl.URLFromClusterIPImpl
+
+## Step 5: Rebuild kubernetes-client and verify all four implementations
+
+$ ./scripts/mvnj -pl kubernetes-client package -DskipTests 2>&1 | tee /tmp/step5-build.log | tail -30
+[INFO]
+[INFO] --- jandex:3.6.0:jandex (make-index) @ kubernetes-client ---
+[INFO] Saving Jandex index: .../kubernetes-client/target/classes/META-INF/jandex.idx
+[INFO]
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ kubernetes-client ---
+[INFO] Copying 11 resources from src/test/resources to target/test-classes
+[INFO]
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ kubernetes-client ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO]
+[INFO] --- surefire:3.5.6:test (default-test) @ kubernetes-client ---
+[INFO] Tests are skipped.
+[INFO]
+[INFO] --- jar:3.5.1:jar (default-jar) @ kubernetes-client ---
+[INFO] Building jar: .../kubernetes-client/target/kubernetes-client-999-SNAPSHOT.jar
+[INFO]
+[INFO] --- jar:3.5.1:test-jar (default) @ kubernetes-client ---
+[INFO] Building jar: .../kubernetes-client/target/kubernetes-client-999-SNAPSHOT-tests.jar
+[INFO]
+[INFO] --- bundle:5.1.9:bundle (bundle) @ kubernetes-client ---
+[WARNING] Include-Resource: overriding META-INF/services/io.fabric8.kubernetes.client.ServiceToURLProvider=src/main/resources/META-INF/services/io.fabric8.kubernetes.client.ServiceToURLProvider with /META-INF/services/io.fabric8.kubernetes.client.ServiceToURLProvider=target/classes/META-INF/services/io.fabric8.kubernetes.client.ServiceToURLProvider (add {maven-resources} if you want to include the maven resources)
+[WARNING] Bundle io.fabric8:kubernetes-client:jar:999-SNAPSHOT : Unused -privatepackage instructions , no such package(s) on the class path: [io.fabric8.kubernetes.client.handlers]
+[INFO] Building bundle: .../kubernetes-client/target/kubernetes-client-999-SNAPSHOT-bundle.jar
+[INFO] Writing manifest: .../kubernetes-client/target/classes/META-INF/MANIFEST.MF
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  2.699 s
+[INFO] Finished at: 2026-08-09T06:32:57+01:00
+[INFO] ------------------------------------------------------------------------
+
+$ ./scripts/jdk-run jar --describe-module --file=kubernetes-client/target/kubernetes-client-999-SNAPSHOT-bundle.jar | tee /tmp/step5-describe.log | grep -E 'provides|uses'
+provides io.fabric8.kubernetes.client.ServiceToURLProvider with io.fabric8.kubernetes.client.impl.URLFromClusterIPImpl io.fabric8.kubernetes.client.impl.URLFromEnvVarsImpl io.fabric8.kubernetes.client.impl.URLFromIngressImpl io.fabric8.kubernetes.client.impl.URLFromNodePortImpl
+
+RESULT: all four URLFrom*Impl implementations landed in a single `provides` clause.
+
+SYNTAX COST DATUM: the plain repeated-clause syntax (four separate
+`osgi.serviceloader; osgi.serviceloader=...; register:=...` stanzas, each naming ONE
+implementation, comma-separated in the same Provide-Capability property, exactly as
+given in the task brief's Step 4 snippet) was sufficient. The `osgi.serviceloader~2`,
+`~3`, `~4` duplicate-marker form was NOT required — bnd did not deduplicate the four
+clauses down to one implementation in this case. Inspecting the raw manifest
+(META-INF/MANIFEST.MF inside the bundle jar) confirms bnd preserved all four as
+distinct Provide-Capability namespace entries:
+
+Provide-Capability: osgi.service;objectClass:List<String>="io.fabric8.kubernetes.client.KubernetesClient,io.fabric8.kubernetes.client.NamespacedKubernetesClient";uses:="io.fabric8.kubernetes.client,io.fabric8.kubernetes.client",osgi.serviceloader;osgi.serviceloader="io.fabric8.kubernetes.client.ServiceToURLProvider";register:="io.fabric8.kubernetes.client.impl.URLFromEnvVarsImpl",osgi.serviceloader;osgi.serviceloader="io.fabric8.kubernetes.client.ServiceToURLProvider";register:="io.fabric8.kubernetes.client.impl.URLFromIngressImpl",osgi.serviceloader;osgi.serviceloader="io.fabric8.kubernetes.client.ServiceToURLProvider";register:="io.fabric8.kubernetes.client.impl.URLFromNodePortImpl",osgi.serviceloader;osgi.serviceloader="io.fabric8.kubernetes.client.ServiceToURLProvider";register:="io.fabric8.kubernetes.client.impl.URLFromClusterIPImpl"
+
+(unwrapped from the manifest's 72-column continuation-line format for readability;
+the header key/value content is otherwise verbatim)
+
+`jar --describe-module` then merges these four same-namespace, same-interface
+capabilities into the single `provides ... with a b c d` module-info entry shown above.
+The brief's warned failure mode (dedup collapsing to one implementation, requiring the
+`~2`/`~3`/`~4` marker) did NOT occur for this module/bnd version combination — recorded
+here as a real (negative) cost datum for the comparison, not assumed.
+
+No NPE occurred building kubernetes-client (its osgi.require-capability does not use
+`filter:="(osgi.serviceloader=...)"`, so it does not hit the Task 2 bndlib NPE).
+
+## Step 6: `uses` clause on the consuming side (kubernetes-client-api)
+
+## uses clauses (derived from Require-Capability osgi.serviceloader)
+NONE
+
+kubernetes-client-api/pom.xml's current osgi.require-capability is:
+    <osgi.require-capability>
+      osgi.extender;
+      filter:="(osgi.extender=osgi.serviceloader.processor)",
+    </osgi.require-capability>
+This names the generic serviceloader-processor extender, not a specific
+`filter:="(osgi.serviceloader=<interface>)"` clause, so bnd has nothing to derive a
+`uses` entry from. Building kubernetes-client-api (`./scripts/mvnj -pl
+kubernetes-client-api package -DskipTests`) succeeded with no NPE — this module's
+Require-Capability does not hit the Task 2 bndlib NPE pattern (no
+filter:="(osgi.serviceloader=...)" present).
+
+Per the brief: a missing `uses` does not break ServiceLoader resolution, but it is
+required for jlink and is part of a correct descriptor. kubernetes-client-api would
+need osgi.require-capability entries with filter:="(osgi.serviceloader=<interface>)"
+for HttpClient$Factory and/or ServiceToURLProvider added to get a `uses` clause — this
+task did not add that (out of scope per the brief; Step 6 is a check, not a fix).
+Note: adding such a filter clause is exactly the shape that triggered the bndlib NPE in
+kubernetes-model-core during Task 2 (see next paragraph) — this was NOT attempted here.
+
+## NPE risk noted, not encountered in this task's builds
+
+Task 2 found `JPMSModuleInfoPlugin.serviceLoaderUses` reads the serviceloader value via
+plain `attrs.get(...)`, which is null when the value is expressed through
+`filter:="(osgi.serviceloader=...)"`, causing an NPE at
+`Descriptors.getTypeRefFromFQN` — this affects the `uses` path (serviceLoaderUses), not
+the `provides` path (serviceLoaderProviders, which guards with containsKey and is
+null-safe). None of the three builds run in this task (httpclient-jdk,
+kubernetes-client, kubernetes-client-api) triggered this NPE, because none of their
+Require-Capability blocks use the filter:="(osgi.serviceloader=...)" form. This risk
+remains real for any module that does use that form (e.g. kubernetes-model-core per
+Task 2) but was not re-triggered here.
+
+## Step 7: Full descriptor dumps
+
+$ ./scripts/dump-module-descriptors.sh httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar kubernetes-client/target/kubernetes-client-999-SNAPSHOT-bundle.jar
+=== kubernetes-client-999-SNAPSHOT-bundle.jar ===
+HAS module-info.class
+io.fabric8.kubernetes.client@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-client/target/kubernetes-client-999-SNAPSHOT-bundle.jar!/module-info.class open
+exports io.fabric8.kubernetes.client
+exports io.fabric8.kubernetes.client.dsl
+exports io.fabric8.kubernetes.client.dsl.base
+exports io.fabric8.kubernetes.client.dsl.internal
+exports io.fabric8.kubernetes.client.dsl.internal.apps.v1
+exports io.fabric8.kubernetes.client.dsl.internal.batch.v1
+exports io.fabric8.kubernetes.client.dsl.internal.certificates.v1
+exports io.fabric8.kubernetes.client.dsl.internal.certificates.v1beta1
+exports io.fabric8.kubernetes.client.dsl.internal.core.v1
+exports io.fabric8.kubernetes.client.dsl.internal.extensions.v1beta1
+exports io.fabric8.kubernetes.client.dsl.internal.uploadable
+exports io.fabric8.kubernetes.client.extended.leaderelection
+exports io.fabric8.kubernetes.client.extended.leaderelection.resourcelock
+exports io.fabric8.kubernetes.client.extended.run
+exports io.fabric8.kubernetes.client.extension
+exports io.fabric8.kubernetes.client.http
+exports io.fabric8.kubernetes.client.impl
+exports io.fabric8.kubernetes.client.informers
+exports io.fabric8.kubernetes.client.informers.cache
+exports io.fabric8.kubernetes.client.informers.impl
+exports io.fabric8.kubernetes.client.informers.impl.cache
+exports io.fabric8.kubernetes.client.internal
+exports io.fabric8.kubernetes.client.lib
+exports io.fabric8.kubernetes.client.osgi
+exports io.fabric8.kubernetes.client.readiness
+exports io.fabric8.kubernetes.client.utils
+exports io.fabric8.kubernetes.client.utils.internal
+exports io.fabric8.kubernetes.internal
+provides io.fabric8.kubernetes.client.ServiceToURLProvider with io.fabric8.kubernetes.client.impl.URLFromClusterIPImpl io.fabric8.kubernetes.client.impl.URLFromEnvVarsImpl io.fabric8.kubernetes.client.impl.URLFromIngressImpl io.fabric8.kubernetes.client.impl.URLFromNodePortImpl
+requires com.fasterxml.jackson.annotation transitive
+requires jackson-core transitive
+requires jackson-databind transitive
+requires jackson-dataformat-yaml
+requires jackson-datatype-jsr310
+requires java.base transitive
+requires kubernetes-model-admissionregistration transitive
+requires kubernetes-model-apiextensions transitive
+requires kubernetes-model-apps transitive
+requires kubernetes-model-autoscaling transitive
+requires kubernetes-model-batch transitive
+requires kubernetes-model-certificates transitive
+requires kubernetes-model-common transitive
+requires kubernetes-model-coordination transitive
+requires kubernetes-model-core transitive
+requires kubernetes-model-discovery transitive
+requires kubernetes-model-events transitive
+requires kubernetes-model-extensions transitive
+requires kubernetes-model-flowcontrol transitive
+requires kubernetes-model-metrics transitive
+requires kubernetes-model-networking transitive
+requires kubernetes-model-node transitive
+requires kubernetes-model-policy transitive
+requires kubernetes-model-rbac transitive
+requires kubernetes-model-resource transitive
+requires kubernetes-model-scheduling transitive
+requires kubernetes-model-storageclass transitive
+requires org.apache.commons.compress
+requires org.snakeyaml.engine
+requires slf4j-api transitive
+requires zjsonpatch
+
+=== kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar ===
+HAS module-info.class
+io.fabric8.kubernetes.client.jdkhttp@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar!/module-info.class open
+exports io.fabric8.kubernetes.client.jdkhttp
+provides io.fabric8.kubernetes.client.http.HttpClient$Factory with io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+requires java.base
+requires java.net.http
+requires kubernetes-client-api transitive
+requires slf4j-api
+
+## Scope note
+
+This task proves a `provides` clause is emitted in the module descriptor for both
+modules, and that the nested-interface and multi-implementation forms are emitted
+correctly by bnd 6.3.1. It does NOT prove ServiceLoader resolves these providers at
+runtime from a named module on the module path — that requires a module-path consumer,
+which is out of scope for this task.
