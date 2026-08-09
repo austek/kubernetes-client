@@ -1,0 +1,277 @@
+Step 4: macro resolution check (zjsonpatch)
+============================================
+${replace;${project.artifactId};-;.} DID evaluate. Manifest line, read directly from the built jar:
+
+Automatic-Module-Name: io.fabric8.zjsonpatch
+
+No fallback to ${replacestring;...} was needed.
+
+Step 5: class-file format check (zjsonpatch)
+=============================================
+javap -v on the extracted module-info.class:
+
+  minor version: 0
+  major version: 53
+  flags: (0x8000) ACC_MODULE
+
+major version 53 == Java 9 class format, safe for the Java 11 floor. Confirmed.
+
+Step 7: descriptor dump for the bundle-packaged modules
+=========================================================
+IMPORTANT DEVIATION FROM THE BRIEF: kubernetes-model-core cannot be built under this
+arm's central config. Building it crashes bnd with an NPE (full analysis below, under
+"## Edge case findings"). Because Maven aborts the reactor at the first failing module,
+the single combined command the brief specifies
+
+  ./scripts/mvnj -pl zjsonpatch,kubernetes-model-generator/kubernetes-model-core,kubernetes-model-generator/openshift-model,kubernetes-model-generator/openshift-model-config package -DskipTests
+
+cannot produce any output past kubernetes-model-core. The dump below was captured from a
+second command that lists only the three modules that build successfully:
+
+  ./scripts/mvnj -pl zjsonpatch,kubernetes-model-generator/openshift-model,kubernetes-model-generator/openshift-model-config package -DskipTests
+
+=== openshift-model-999-SNAPSHOT.jar ===
+HAS module-info.class
+io.fabric8.openshift.model@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar!/module-info.class open
+exports io.fabric8.openshift.api.model
+exports io.fabric8.openshift.api.model.customresourcestatus.conditions.v1
+requires com.fasterxml.jackson.annotation transitive
+requires jackson-core transitive
+requires jackson-databind transitive
+requires java.base
+requires kubernetes-model-common transitive
+requires kubernetes-model-core transitive
+requires kubernetes-model-rbac transitive
+
+=== openshift-model-config-999-SNAPSHOT.jar ===
+HAS module-info.class
+io.fabric8.openshift.model.config@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar!/module-info.class open
+exports io.fabric8.openshift.api.model.config.v1
+exports io.fabric8.openshift.api.model.config.v1alpha2
+requires com.fasterxml.jackson.annotation transitive
+requires jackson-databind transitive
+requires java.base
+requires kubernetes-model-common transitive
+requires kubernetes-model-core transitive
+
+=== zjsonpatch-999-SNAPSHOT.jar ===
+HAS module-info.class
+io.fabric8.zjsonpatch@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar!/module-info.class open
+exports io.fabric8.zjsonpatch
+exports io.fabric8.zjsonpatch.internal.collections4
+requires jackson-core
+requires jackson-databind transitive
+requires java.base
+
+=== kubernetes-model-core-999-SNAPSHOT.jar ===
+BUILD FAILED — no jar produced. See "## Edge case findings" -> "kubernetes-model-core build
+crash" below for the full root-cause analysis. All three modules above still report
+"HAS module-info.class" and an "open module io.fabric8.<name>", matching the brief's
+expectation for the modules that could be built.
+
+## Edge case findings
+
+### kubernetes-model-core build crash (blocks Step 7 for 1 of 4 modules)
+
+`./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests`
+fails with BUILD FAILURE. Stack trace (top frames):
+
+  [ERROR] Bundle io.fabric8:kubernetes-model-core:bundle:999-SNAPSHOT : Exception: java.lang.NullPointerException: Cannot invoke "String.hashCode()" because "<local2>" is null
+  	at aQute.bnd.osgi.Descriptors.getTypeRefFromFQN(Descriptors.java:703)
+  	at aQute.bnd.osgi.Analyzer.getTypeRefFromFQN(Analyzer.java:3200)
+  	at aQute.bnd.plugin.jpms.JPMSModuleInfoPlugin.lambda$serviceLoaderUses$35(JPMSModuleInfoPlugin.java:515)
+  	...
+  [ERROR] Bundle io.fabric8:kubernetes-model-core:bundle:999-SNAPSHOT : Verifier Plugin aQute.bnd.plugin.jpms.JPMSModuleInfoPlugin@326a6d81 failed Cannot invoke "String.hashCode()" because "<local2>" is null
+
+Root cause, confirmed against the bndlib 6.3.1 source (bndtools/bnd JPMSModuleInfoPlugin.java,
+serviceLoaderUses method):
+
+  requireCapabilities.stream()
+      .filterKey(key -> removeDuplicateMarker(key).equals(SERVICELOADER_NAMESPACE))
+      .values()
+      .forEachOrdered(attrs -> {
+          TypeRef typeRef = analyzer.getTypeRefFromFQN(attrs.get(SERVICELOADER_NAMESPACE));
+          ...
+      });
+
+This reads the `osgi.serviceloader` clause's own key ("osgi.serviceloader=<value>") as a plain
+attribute. kubernetes-model-core's pom.xml (pre-existing, NOT modified by this task) declares:
+
+  <osgi.require-capability>
+    osgi.extender;
+      filter:="(osgi.extender=osgi.serviceloader.processor)",
+      osgi.serviceloader;
+      filter:="(osgi.serviceloader=io.fabric8.kubernetes.api.model.KubernetesResource)";
+      cardinality:=multiple
+  </osgi.require-capability>
+
+This is the spec-correct OSGi ServiceLoader Mediator form: a Require-Capability expresses the
+value via an LDAP `filter:=` directive, not via a direct `osgi.serviceloader=<value>` attribute
+(that direct-attribute form only applies to Provide-Capability, which kubernetes-model-core also
+declares correctly and separately). bnd's serviceLoaderUses does not parse the filter string; it
+does a naive attrs.get("osgi.serviceloader") lookup, gets null on this filter-only clause, and
+passes null into getTypeRefFromFQN, which NPEs.
+
+This is a genuine bug in bndlib 6.3.1 (embedded in maven-bundle-plugin 5.1.9), not a
+misconfiguration on our side, and there is no `-jpms-module-info` instruction flag to disable
+`uses` derivation from ServiceLoader capabilities (unlike the `requires()` method in the same
+plugin, which honours an IGNORE_ATTRIBUTE that serviceLoaderUses does not check). The only ways
+to avoid the crash — upgrading the pinned maven-bundle-plugin/bndlib version, or removing/altering
+kubernetes-model-core's pre-existing osgi.require-capability — are both out of scope for this
+task (central-version bump changes the comparison; per-module descriptor-content edits are the
+exact thing this arm's thesis says not to touch). Left unfixed.
+
+Consequence beyond kubernetes-model-core itself: because it never produces a jar with a real
+Automatic-Module-Name/module-info, every module that depends on it (openshift-model,
+openshift-model-config) can only guess its module name from the raw Maven artifactId
+("kubernetes-model-core") rather than the correctly-dotted JPMS name
+("io.fabric8.kubernetes.model.core") — see "dependency module names bnd had to guess" below.
+This crash is squarely the subject Task 4 was scoped to investigate ("ServiceLoader provides
+gap"), but it manifests as a hard build failure, not a soft gap.
+
+### Split package resolved (spec edge case 2)
+
+  $ ./scripts/scan-split-packages.sh \
+      kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar \
+      kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar
+  OK no split packages
+
+The osgi.export exclusion in openshift-model/pom.xml took effect: exit 0, "OK no split
+packages". Confirmed clean.
+
+### requires transitive inference (does uses: produce transitive?)
+
+  $ ./scripts/jdk-run jar --describe-module --file=kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar | grep -E 'requires' | sort
+  requires com.fasterxml.jackson.annotation transitive
+  requires jackson-core transitive
+  requires jackson-databind transitive
+  requires java.base
+  requires kubernetes-model-common transitive
+  requires kubernetes-model-core transitive
+  requires kubernetes-model-rbac transitive
+
+Divergence from the brief's prediction: the brief expected
+"requires transitive io.fabric8.kubernetes.model.core" and
+"requires transitive io.fabric8.openshift.model.config". We got:
+  - `requires kubernetes-model-core transitive` — right relationship (transitive, correct
+    dependency), WRONG module name (raw artifactId, no dots — see "dependency module names bnd
+    had to guess" below for why).
+  - No requires entry for openshift-model-config AT ALL, transitive or otherwise. Verified this
+    is not a bug: openshift-model's generated sources
+    (kubernetes-model-generator/openshift-model/src/generated/java) contain zero references to
+    any io.fabric8.openshift.api.model.config class, even though openshift-model-config is a
+    declared Maven <dependency>. bnd's Import-Package (and hence requires) is computed from
+    actual bytecode references, so it correctly omits an unused dependency. The brief's prediction
+    assumed a code-level dependency that does not exist in this codebase's current class layout.
+
+### requires static inference (spec edge case 5)
+
+Could not run the brief's literal command — `jar --describe-module` on
+kubernetes-model-core-999-SNAPSHOT.jar — because that jar was never produced (see build crash
+above). Substituted the same check on the two modules that did build and share the same
+Sundrio-builder/annotation-processing toolchain:
+
+  $ ./scripts/jdk-run jar --describe-module --file=kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar | grep -E 'requires' | sort
+  (see full list above)
+
+  $ ./scripts/jdk-run jar --describe-module --file=kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar | grep -E 'requires' | sort
+  requires com.fasterxml.jackson.annotation transitive
+  requires jackson-databind transitive
+  requires java.base
+  requires kubernetes-model-common transitive
+  requires kubernetes-model-core transitive
+
+Neither module's requires list contains org.osgi.service.component.annotations,
+builder-annotations, resourcecify-annotations, or any sundr-* package — mandatory or static.
+bnd appears to drop these entirely rather than mark them `static`: they are annotation-only,
+compile-time dependencies (Sundrio's @Buildable etc.) with no retained bytecode references, so
+they never enter Import-Package in the first place. Net effect for these two modules is the same
+outcome the spec hoped for (consumers are not forced to put OSGi/Sundrio on the module path) but
+via a different, unverified-for-kubernetes-model-core mechanism. This specific check is
+UNAVAILABLE for kubernetes-model-core itself and remains open — record as a gap, not a pass.
+
+### dependency module names bnd had to guess (spec edge case 6)
+
+The brief's literal grep target ("Can't find a module name for imported package") returns zero
+matches on both:
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests -X 2>&1 \
+      | grep -i "Can't find a module name for imported package" | sort -u
+  (no output)
+
+  $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model package -DskipTests -X 2>&1 \
+      | grep -i "Can't find a module name for imported package" | sort -u
+  (no output)
+
+Read plainly this would look like "empty list, good result" — but it is not. For
+kubernetes-model-core the debug build never reaches that check at all; it crashes first (see
+above). For openshift-model the build succeeds, but the string still never appears, because bnd
+never fails to find *a* name — it falls back to a naive, frequently WRONG guess instead of
+reporting failure. That guess is visible in the same debug log under a different message:
+
+  [DEBUG] begin aQute.bnd.plugin.jpms.JPMSModuleInfoPlugin@326a6d81
+  [DEBUG] Using module name 'kubernetes-model-core' for: Jar:kubernetes-model-core
+  [DEBUG] Using module name 'kubernetes-model-common' for: Jar:kubernetes-model-common
+  [DEBUG] Using module name 'slf4j-api' for: Jar:slf4j-api
+  [DEBUG] Using module name 'kubernetes-model-rbac' for: Jar:kubernetes-model-rbac
+  [DEBUG] Using module name 'openshift-model-config' for: Jar:openshift-model-config
+  [DEBUG] Using module name 'builder-annotations' for: Jar:builder-annotations
+  [DEBUG] Using module name 'sundr-codegen-apt' for: Jar:sundr-codegen-apt
+  [DEBUG] Using module name 'sundr-codegen-api' for: Jar:sundr-codegen-api
+  [DEBUG] Using module name 'sundr-adapter-apt' for: Jar:sundr-adapter-apt
+  [DEBUG] Using module name 'sundr-model-utils' for: Jar:sundr-model-utils
+  [DEBUG] Using module name 'sundr-adapter-reflect' for: Jar:sundr-adapter-reflect
+  [DEBUG] Using module name 'sundr-model' for: Jar:sundr-model
+  [DEBUG] Using module name 'sundr-core' for: Jar:sundr-core
+  [DEBUG] Using module name 'sundr-model-base' for: Jar:sundr-model-base
+  [DEBUG] Using module name 'sundr-adapter-api' for: Jar:sundr-adapter-api
+  [DEBUG] Using module name 'sundr-model-repo' for: Jar:sundr-model-repo
+  [DEBUG] Using module name 'resourcecify-annotations' for: Jar:resourcecify-annotations
+  [DEBUG] Using module name 'jackson-databind' for: Jar:jackson-databind
+  [DEBUG] Using module name 'jackson-core' for: Jar:jackson-core
+
+None of the artifactId-shaped guesses above are correct JPMS module names (they lack the
+`io.fabric8.` / `com.fasterxml.` dotted prefix a real Automatic-Module-Name or module-info would
+carry). The one dependency that DOES surface correctly in the actual `requires` output is
+`com.fasterxml.jackson.annotation` (jackson-annotations) — because
+that jar ships a REAL module-info.class at the jar root — versus `jackson-core` / `jackson-databind`
+which stay wrong, because those two jars only ship module-info.class inside a multi-release JAR
+directory (META-INF/versions/9/module-info.class), which bnd's classpath analysis does not read.
+Confirmed directly:
+
+  jackson-annotations-2.21.jar:  module-info.class                      (root)   -> real module: com.fasterxml.jackson.annotation
+  jackson-core-2.21.4.jar:       META-INF/versions/9/module-info.class  (MR jar) -> real module: com.fasterxml.jackson.core   (bnd guesses "jackson-core")
+  jackson-databind-2.21.4.jar:   META-INF/versions/9/module-info.class  (MR jar) -> real module: com.fasterxml.jackson.databind (bnd guesses "jackson-databind")
+  kubernetes-model-core (this reactor): no Automatic-Module-Name, no module-info at all in the
+    ~/.m2-seeded jar (predates this spike) -> bnd guesses "kubernetes-model-core" instead of the
+    real "io.fabric8.kubernetes.model.core" this task's own config would have produced, had the
+    build not crashed.
+
+This is the most important measurement in the task: bnd's -jpms-module-info silently produces
+WRONG `requires` clauses — not missing ones — whenever a dependency's real module name is not
+visible at the jar root. Any consumer placed on a real module path would fail at module
+resolution ("module X requires jackson-core, but module jackson-core not found") even though the
+build succeeds and the descriptor looks superficially correct.
+
+## Harness fix (scripts/dump-module-descriptors.sh)
+
+Found and fixed a latent bug in the "HAS module-info.class" branch, unrelated to this task's pom
+changes but blocking faithful evidence collection: the original
+
+  jar --describe-module --file="$jar" | { head -1; tail -n +2 | sed ... | sort; }
+
+pipes the same command's output into both `head` and `tail` in sequence. `head -1` performs a
+buffered read that drains the whole (short) pipe in one syscall, so `tail -n +2` sees EOF and
+prints nothing — every "HAS module-info.class" block silently lost its exports/requires body,
+keeping only the module-name header line. This never manifested in Task 1's baseline because no
+jar there actually had a module-info.class (all 999-SNAPSHOT automatic-module names failed to
+derive). Fixed by capturing the describe-module output into a variable once, then feeding that
+same in-memory string to `head` and `tail` separately:
+
+  mod_desc="$(jar --describe-module --file="$jar")"
+  printf '%s\n' "$mod_desc" | head -1
+  printf '%s\n' "$mod_desc" | tail -n +2 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | sort
+
+Verified fixed: the zjsonpatch dump in Step 7 above now shows exports/requires lines; before the
+fix it showed only the module-name header line. This fix affects every later task that calls this
+script; carry it forward.
