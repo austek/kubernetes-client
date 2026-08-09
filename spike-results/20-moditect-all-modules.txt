@@ -655,3 +655,137 @@ zjsonpatch (the other module with a Jackson dependency) still builds clean under
    the 7 target modules and is not counted in the "6 new / 7 total" figure. A reader restating
    that figure should read it as "6 of the 7 original slice modules, plus a further 8th module's
    worth of naming and exclusion cost paid to unblock just one of them."
+
+## Follow-up: does moditect write into a packaging=jar main jar?
+
+### The question
+
+This arm's central claimed advantage over bnd is that moditect's add-module-info goal
+post-processes a module's own main jar regardless of packaging, whereas bnd's descriptor lands in
+a separate "-bundle" classified artifact for packaging=jar modules — so consumers depending on the
+plain jar get nothing from bnd, but should get something from moditect. In the original Step 9
+run, this was never actually measured: the only module that succeeded (zjsonpatch) is
+packaging=bundle, and all three packaging=jar slice modules (kubernetes-client-api,
+kubernetes-client, httpclient-jdk) failed on the jdeps closure-naming problem documented above,
+for reasons unrelated to packaging. So the "reaches packaging=jar main jars" claim was an
+inference from how the plugin is wired, not a direct measurement.
+
+### Why generator-annotations
+
+generator-annotations is packaging=jar and has zero compile-scope dependencies (its pom.xml has
+no <dependencies> block at all — confirmed by reading the file directly). With no dependency
+closure, there is nothing for jdeps to fail to resolve, and no confound with the 999-SNAPSHOT
+naming problem that blocked every other packaging=jar module in this spike. This module is
+explicitly outside the original 7-module slice; the coverage figures elsewhere in this file
+("1 of 7", "6 new lines / 7 total") are unaffected by this section and do not include it.
+
+Added to generator-annotations/pom.xml's (previously nonexistent) <properties> block:
+
+  <jpms.module.name>io.fabric8.generator.annotations</jpms.module.name>
+
+### The build
+
+$ ./scripts/mvnj -pl generator-annotations package -DskipTests 2>&1 | tail -20
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ generator-annotations ---
+[INFO] No sources to compile
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ generator-annotations ---
+[INFO] Tests are skipped.
+[INFO] 
+[INFO] --- jar:3.5.1:jar (default-jar) @ generator-annotations ---
+[INFO] Building jar: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/generator-annotations/target/generator-annotations-999-SNAPSHOT.jar
+[INFO] 
+[INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ generator-annotations ---
+[INFO] Running jdeps --generate-module-info /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/generator-annotations/target/moditect --multi-release 9 /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/generator-annotations/target/moditect/4203566060169238461/generator-annotations-999-SNAPSHOT.jar
+writing to /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/generator-annotations/target/moditect/io.fabric8.generator.annotations/versions/9/module-info.java
+[INFO] Created module descriptor at /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/generator-annotations/target/moditect/generated-sources/io.fabric8.generator.annotations/module-info.java
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  1.830 s
+[INFO] Finished at: 2026-08-09T09:29:16+01:00
+[INFO] ------------------------------------------------------------------------
+
+BUILD SUCCESS. No naming problem, no jdeps module-path resolution failure — exactly as expected
+for a module with zero compile dependencies.
+
+### The descriptor dump
+
+$ ./scripts/dump-module-descriptors.sh generator-annotations/target/generator-annotations-999-SNAPSHOT.jar
+=== generator-annotations-999-SNAPSHOT.jar ===
+HAS module-info.class
+io.fabric8.generator.annotations@999-SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/generator-annotations/target/generator-annotations-999-SNAPSHOT.jar!/module-info.class open
+exports io.fabric8.crd.generator.annotation
+exports io.fabric8.generator.annotation
+requires java.base mandated
+
+**ANSWER: YES.** The jar dumped above is generator-annotations-999-SNAPSHOT.jar — the plain,
+unclassified main jar that packaging=jar produces (no "-bundle" suffix, no separate classified
+artifact). It HAS a real module-info.class, with the correct name
+(io.fabric8.generator.annotations) and correct exports for both packages the module's source
+contains. This proves the mechanism itself reaches a packaging=jar main jar when there is no
+dependency closure to confound it.
+
+**Explicit boundary**: this does NOT prove the three packaging=jar slice modules
+(kubernetes-client-api, kubernetes-client, httpclient-jdk) would succeed. Those fail for a
+different, independent reason — the jdeps closure-naming problem documented in Step 9 and the
+"Edge case findings" section above, which applies regardless of packaging type (it already
+blocked packaging=bundle modules too, e.g. openshift-model, openshift-model-config). What this
+result shows is narrower and precise: moditect's add-module-info goal is not structurally
+restricted to bundle-classified artifacts the way bnd's bundle plugin is — the packaging=jar
+coverage gap those three slice modules show is entirely attributable to the naming/closure
+problem, not to any packaging-related limitation of moditect itself.
+
+### Class-file version and open-module check
+
+$ ./scripts/jdk-run javap -v /tmp/genannot-extract/module-info.class
+Classfile /tmp/genannot-extract/module-info.class
+  Last modified Jun 29, 2026; size 236 bytes
+  SHA-256 checksum 09099e8206670625ce45c1730860db16aa946b03de1179fb223ed3290c3a11b2
+open module io.fabric8.generator.annotations@999-SNAPSHOT
+  minor version: 0
+  major version: 53
+  flags: (0x8000) ACC_MODULE
+  this_class: #2                          // "module-info"
+  super_class: #0
+  interfaces: 0, fields: 0, methods: 0, attributes: 1
+Constant pool:
+   #1 = Utf8               module-info
+   #2 = Class              #1             // "module-info"
+   #3 = Utf8               io.fabric8.generator.annotations
+   #4 = Module             #3             // "io.fabric8.generator.annotations"
+   #5 = Utf8               999-SNAPSHOT
+   #6 = Utf8               io/fabric8/crd/generator/annotation
+   #7 = Package            #6             // io/fabric8/crd/generator/annotation
+   #8 = Utf8               io/fabric8/generator/annotation
+   #9 = Package            #8             // io/fabric8/generator/annotation
+  #10 = Utf8               java.base
+  #11 = Module             #10            // "java.base"
+  #12 = Utf8               Module
+{
+}
+Module:
+  #4,1020                                 // "io.fabric8.generator.annotations" ACC_OPEN ACC_SYNTHETIC
+  #5                                      // 999-SNAPSHOT
+  1                                       // requires
+    #11,8000                                // "java.base" ACC_MANDATED
+    #0
+  2                                       // exports
+    #7,0                                    // io/fabric8/crd/generator/annotation
+    #9,0                                    // io/fabric8/generator/annotation
+  0                                       // opens
+  0                                       // uses
+  0                                       // provides
+
+**Class-file version: major 53, minor 0** (Java 9 class format), with `flags: (0x8000)
+ACC_MODULE`. Identical to the bnd arm's own major-53/ACC_MODULE result for its module-info
+(spike-results/10-bnd-bundle-modules.txt) — no divergence, no concern for the Java 11 floor either
+way.
+
+**Is the module open? YES.** Both the `dump-module-descriptors.sh` header
+("io.fabric8.generator.annotations@999-SNAPSHOT ... open") and the raw javap output ("open module
+io.fabric8.generator.annotations@999-SNAPSHOT", and the constant-pool Module attribute's
+`ACC_OPEN` flag on the module entry) confirm it. The `<open>true</open>` element in the shared
+moditect configuration (pom.xml pluginManagement) is verified to actually take effect in the
+emitted bytecode, not just accepted silently as configuration.

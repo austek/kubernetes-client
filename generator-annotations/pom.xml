@@ -30,4 +30,8 @@
   <packaging>jar</packaging>
   <name>Fabric8 :: Generator Annotations</name>
 
+  <properties>
+    <jpms.module.name>io.fabric8.generator.annotations</jpms.module.name>
+  </properties>
+
 </project>
