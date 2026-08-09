@@ -143,6 +143,14 @@ start with a digit:
   Unable to derive module descriptor for: .../kubernetes-model-common-999-SNAPSHOT.jar
   kubernetes.model.common.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
 
+NOTE (added post-review, during the re-audit for this fix round): this block reflects the
+~/.m2 state as of this Step 9 investigation, before Experiment A below permanently installed a
+real, fixed kubernetes-model-common-999-SNAPSHOT.jar. Re-running this exact command today, after
+Experiment A, returns a real module descriptor instead (io.fabric8.kubernetes.model.common,
+correctly named) — that is Experiment A's whole point, not a contradiction. Flagged here so a
+reader who tries to reproduce this specific line after reading the rest of the file is not
+surprised.
+
 Every one of the 6 failing modules depends, directly or transitively, on at least one artifact
 that is neither one of our 7 explicitly-named target modules nor a real JPMS module already
 (most fabric8 kubernetes-model-* submodules, httpclient-vertx, and — under this harness's
@@ -278,6 +286,14 @@ requires com.fasterxml.jackson.core
 requires com.fasterxml.jackson.databind
 requires java.base mandated
 
+NOTE (added post-review, during the re-audit for this fix round): this is the state as of this
+Step 9 measurement (1/7). kubernetes-model-core's target/ jar was subsequently rebuilt during
+Experiment A below, and now carries a real descriptor too — re-running this exact
+dump-module-descriptors.sh command today shows kubernetes-model-core in the "HAS module-info.class"
+category, matching the "Follow-up: bootstrap experiment" section's own findings, not
+contradicting this one. This note exists so the two sections read as sequential history rather
+than an unexplained discrepancy.
+
 Note: kubernetes-httpclient-jdk's "Invalid module name" absence here (it gets a synthesized
 automatic-module view with `contains`/`provides`/`requires` instead of an error) is a general
 `jar --describe-module` display quirk unrelated to which arm generated (or failed to generate)
@@ -301,33 +317,60 @@ reached a successful add-module-info execution.
 
 ### jdeps vs the provided-scope sundr toolchain (why #7911 fell back to moduleInfoSource)
 
-$ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests -X 2>&1 \
-    | grep -iE 'jdeps|split package|sundr' | sort -u | head -30
-[DEBUG] collecting Contracts  from sundr-adapter-api
-[DEBUG] collecting Contracts  from sundr-adapter-apt
-[DEBUG] collecting Contracts  from sundr-adapter-reflect
-[DEBUG] collecting Contracts  from sundr-codegen-api
-[DEBUG] collecting Contracts  from sundr-codegen-apt
-[DEBUG] collecting Contracts  from sundr-core
-[DEBUG] collecting Contracts  from sundr-model
-[DEBUG] collecting Contracts  from sundr-model-base
-[DEBUG] collecting Contracts  from sundr-model-repo
-[DEBUG] collecting Contracts  from sundr-model-utils
-[DEBUG]   (f) jdepsExtraArgs = [--multi-release, 11]
-[DEBUG]    io.sundr:builder-annotations:jar:0.230.2:provided (exclusions managed from [com.sun:tools:*:*])
-[DEBUG]       io.sundr:resourcecify-annotations:jar:0.230.2:provided
+CORRECTION (post-review): the block originally here was captured with a bare `sort -u`, which is
+locale-dependent — it happened to reproduce in this shell's default locale, but did not match
+`LC_ALL=C sort -u`, the byte-order sort this spike's own harness pins elsewhere specifically for
+reproducibility (see the harness commit "sort descriptor report by basename and pin LC_ALL=C for
+stable ordering"). Regenerated below with LC_ALL=C explicitly, from the same underlying -X debug
+log captured for this same build attempt (unchanged; this is a re-sort of already-captured data,
+not a new build):
+
+$ LC_ALL=C grep -iE 'jdeps|split package|sundr' /tmp/step10-jdeps-debug.log | LC_ALL=C sort -u | head -30
+  </jdepsExtraArgs>
+  <jdepsExtraArgs>
+ /home/austek/.m2/repository/io/sundr/builder-annotations/0.230.2/builder-annotations-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/resourcecify-annotations/0.230.2/resourcecify-annotations-0.230.2.jar
+ /home/austek/.m2/repository/io/sundr/sundr-adapter-api/0.230.2/sundr-adapter-api-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-adapter-apt/0.230.2/sundr-adapter-apt-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-adapter-reflect/0.230.2/sundr-adapter-reflect-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-codegen-api/0.230.2/sundr-codegen-api-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-codegen-apt/0.230.2/sundr-codegen-apt-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-core/0.230.2/sundr-core-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-model-base/0.230.2/sundr-model-base-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-model-repo/0.230.2/sundr-model-repo-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-model-utils/0.230.2/sundr-model-utils-0.230.2.jar,\
+ /home/austek/.m2/repository/io/sundr/sundr-model/0.230.2/sundr-model-0.230.2.jar,\
+[DEBUG]             io.sundr:sundr-core:jar:0.230.2:provided
+[DEBUG]             io.sundr:sundr-model-base:jar:0.230.2:provided
+[DEBUG]             io.sundr:sundr-model-repo:jar:0.230.2:provided
+[DEBUG]             io.sundr:sundr-model-utils:jar:0.230.2:provided
 [DEBUG]          io.sundr:sundr-adapter-api:jar:0.230.2:provided
 [DEBUG]          io.sundr:sundr-adapter-apt:jar:0.230.2:provided
+[DEBUG]          io.sundr:sundr-codegen-api:jar:0.230.2:provided
+[DEBUG]          io.sundr:sundr-model:jar:0.230.2:provided
+[DEBUG]       io.sundr:resourcecify-annotations:jar:0.230.2:provided
 [DEBUG]       io.sundr:sundr-adapter-reflect:jar:0.230.2:provided
-[DEBUG]          io.sundr:sundr-codegen-apt:jar:0.230.2:provided
+[DEBUG]       io.sundr:sundr-codegen-apt:jar:0.230.2:provided
+[DEBUG]    io.sundr:builder-annotations:jar:0.230.2:provided (exclusions managed from [com.sun:tools:*:*])
+[DEBUG]   (f) compilePath = [/home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/classes, /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar, /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.21.4/jackson-databind-2.21.4.jar, /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.21.4/jackson-core-2.21.4.jar, /home/austek/.m2/repository/org/slf4j/slf4j-api/2.0.18/slf4j-api-2.0.18.jar, /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar, /home/austek/.m2/repository/org/projectlombok/lombok/1.18.46/lombok-1.18.46.jar, /home/austek/.m2/repository/io/sundr/builder-annotations/0.230.2/builder-annotations-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-codegen-apt/0.230.2/sundr-codegen-apt-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-codegen-api/0.230.2/sundr-codegen-api-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-adapter-apt/0.230.2/sundr-adapter-apt-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model-utils/0.230.2/sundr-model-utils-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-adapter-reflect/0.230.2/sundr-adapter-reflect-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model/0.230.2/sundr-model-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-core/0.230.2/sundr-core-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model-base/0.230.2/sundr-model-base-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-adapter-api/0.230.2/sundr-adapter-api-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model-repo/0.230.2/sundr-model-repo-0.230.2.jar, /home/austek/.m2/repository/io/sundr/resourcecify-annotations/0.230.2/resourcecify-annotations-0.230.2.jar]
+[DEBUG]   (f) jdepsExtraArgs = [--multi-release, 11]
+[DEBUG]   (f) testPath = [/home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/test-classes, /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/classes, /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar, /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.21.4/jackson-databind-2.21.4.jar, /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.21.4/jackson-core-2.21.4.jar, /home/austek/.m2/repository/org/slf4j/slf4j-api/2.0.18/slf4j-api-2.0.18.jar, /home/austek/.m2/repository/org/mockito/mockito-core/5.23.0/mockito-core-5.23.0.jar, /home/austek/.m2/repository/net/bytebuddy/byte-buddy/1.17.7/byte-buddy-1.17.7.jar, /home/austek/.m2/repository/org/objenesis/objenesis/3.3/objenesis-3.3.jar, /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar, /home/austek/.m2/repository/org/projectlombok/lombok/1.18.46/lombok-1.18.46.jar, /home/austek/.m2/repository/io/sundr/builder-annotations/0.230.2/builder-annotations-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-codegen-apt/0.230.2/sundr-codegen-apt-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-codegen-api/0.230.2/sundr-codegen-api-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-adapter-apt/0.230.2/sundr-adapter-apt-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model-utils/0.230.2/sundr-model-utils-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-adapter-reflect/0.230.2/sundr-adapter-reflect-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model/0.230.2/sundr-model-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-core/0.230.2/sundr-core-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model-base/0.230.2/sundr-model-base-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-adapter-api/0.230.2/sundr-adapter-api-0.230.2.jar, /home/austek/.m2/repository/io/sundr/sundr-model-repo/0.230.2/sundr-model-repo-0.230.2.jar, /home/austek/.m2/repository/io/sundr/resourcecify-annotations/0.230.2/resourcecify-annotations-0.230.2.jar, /home/austek/.m2/repository/org/junit/jupiter/junit-jupiter-engine/5.14.4/junit-jupiter-engine-5.14.4.jar, /home/austek/.m2/repository/org/junit/platform/junit-platform-engine/1.14.4/junit-platform-engine-1.14.4.jar, /home/austek/.m2/repository/org/opentest4j/opentest4j/1.3.0/opentest4j-1.3.0.jar, /home/austek/.m2/repository/org/junit/platform/junit-platform-commons/1.14.4/junit-platform-commons-1.14.4.jar, /home/austek/.m2/repository/org/junit/jupiter/junit-jupiter-api/5.14.4/junit-jupiter-api-5.14.4.jar, /home/austek/.m2/repository/org/apiguardian/apiguardian-api/1.1.2/apiguardian-api-1.1.2.jar, /home/austek/.m2/repository/org/junit/jupiter/junit-jupiter-params/5.14.4/junit-jupiter-params-5.14.4.jar, /home/austek/.m2/repository/org/assertj/assertj-core/3.27.7/assertj-core-3.27.7.jar, /home/austek/.m2/repository/io/fabric8/zjsonpatch/999-SNAPSHOT/zjsonpatch-999-SNAPSHOT.jar, /home/austek/.m2/repository/net/bytebuddy/byte-buddy-agent/1.18.11/byte-buddy-agent-1.18.11.jar]
+[DEBUG]   (s) projectArtifactMap = {io.fabric8:kubernetes-model-common=io.fabric8:kubernetes-model-common:jar:999-SNAPSHOT:compile, com.fasterxml.jackson.core:jackson-databind=com.fasterxml.jackson.core:jackson-databind:jar:2.21.4:compile, com.fasterxml.jackson.core:jackson-core=com.fasterxml.jackson.core:jackson-core:jar:2.21.4:compile, org.slf4j:slf4j-api=org.slf4j:slf4j-api:jar:2.0.18:compile, org.mockito:mockito-core=org.mockito:mockito-core:jar:5.23.0:test, net.bytebuddy:byte-buddy=net.bytebuddy:byte-buddy:jar:1.17.7:test, org.objenesis:objenesis=org.objenesis:objenesis:jar:3.3:test, com.fasterxml.jackson.core:jackson-annotations=com.fasterxml.jackson.core:jackson-annotations:jar:2.21:compile, org.projectlombok:lombok=org.projectlombok:lombok:jar:1.18.46:provided, io.sundr:builder-annotations=io.sundr:builder-annotations:jar:0.230.2:provided, io.sundr:sundr-codegen-apt=io.sundr:sundr-codegen-apt:jar:0.230.2:provided, io.sundr:sundr-codegen-api=io.sundr:sundr-codegen-api:jar:0.230.2:provided, io.sundr:sundr-adapter-apt=io.sundr:sundr-adapter-apt:jar:0.230.2:provided, io.sundr:sundr-model-utils=io.sundr:sundr-model-utils:jar:0.230.2:provided, io.sundr:sundr-adapter-reflect=io.sundr:sundr-adapter-reflect:jar:0.230.2:provided, io.sundr:sundr-model=io.sundr:sundr-model:jar:0.230.2:provided, io.sundr:sundr-core=io.sundr:sundr-core:jar:0.230.2:provided, io.sundr:sundr-model-base=io.sundr:sundr-model-base:jar:0.230.2:provided, io.sundr:sundr-adapter-api=io.sundr:sundr-adapter-api:jar:0.230.2:provided, io.sundr:sundr-model-repo=io.sundr:sundr-model-repo:jar:0.230.2:provided, io.sundr:resourcecify-annotations=io.sundr:resourcecify-annotations:jar:0.230.2:provided, org.junit.jupiter:junit-jupiter-engine=org.junit.jupiter:junit-jupiter-engine:jar:5.14.4:test, org.junit.platform:junit-platform-engine=org.junit.platform:junit-platform-engine:jar:1.14.4:test, org.opentest4j:opentest4j=org.opentest4j:opentest4j:jar:1.3.0:test, org.junit.platform:junit-platform-commons=org.junit.platform:junit-platform-commons:jar:1.14.4:test, org.junit.jupiter:junit-jupiter-api=org.junit.jupiter:junit-jupiter-api:jar:5.14.4:test, org.apiguardian:apiguardian-api=org.apiguardian:apiguardian-api:jar:1.1.2:test, org.junit.jupiter:junit-jupiter-params=org.junit.jupiter:junit-jupiter-params:jar:5.14.4:test, org.assertj:assertj-core=org.assertj:assertj-core:jar:3.27.7:test, io.fabric8:zjsonpatch=io.fabric8:zjsonpatch:jar:999-SNAPSHOT:test, net.bytebuddy:byte-buddy-agent=net.bytebuddy:byte-buddy-agent:jar:1.18.11:test}
+
+(all 30 lines shown verbatim, matching `head -30` exactly)
 
 Could NOT be tested. The Sundrio provided-scope split-package issue that #7911 hit is real
 (the sundr-* jars are visibly present on the provided-scope compilePath, confirmed above), but
 this build never got far enough to reach jdeps's own split-package analysis of them — it fails
 earlier, on the kubernetes-model-common naming problem, before jdeps is even invoked for
 kubernetes-model-core's own module-info generation. Zero occurrences of "split package" in the
-full debug log. Whether jdeps would additionally choke on the Sundrio split package, on top of
-the naming problem, is unknown; the naming problem alone is already fatal and unresolved.
+full debug log (re-confirmed with `LC_ALL=C grep -ic "split package" /tmp/step10-jdeps-debug.log`
+→ 0). Whether jdeps would additionally choke on the Sundrio split package, on top of the naming
+problem, is unknown from this specific build attempt alone — however, the bootstrap experiment
+below independently answers this: once kubernetes-model-common's own build was attempted in
+isolation (Experiment A), jdeps DID reach and hit exactly this Sundrio split package (two
+distinct instances, io.sundr.model and io.sundr.builder), confirming it is real and would have
+blocked kubernetes-model-core too had the naming problem not blocked it first.
 
 ### Split package after the osgi.export fix
 
@@ -381,6 +424,13 @@ module that did succeed, has no META-INF/services entries to test against.)
    bnd. But this undercounts the true cost for moditect: it additionally requires the ENTIRE
    non-target transitive dependency closure to resolve to a legal module name before jdeps will
    run at all — a cost with no bnd equivalent, and the actual reason 6 of 7 builds failed outright.
+   + 1 central 13-artifact provided-scope exclusion list (pom.xml, shared pluginManagement
+   configuration for the Sundr toolchain + lombok), no bnd equivalent, likely to recur as the
+   closure widens — this is a direct reproduction of the split-package problem that made the
+   rejected upstream PR (#7911) abandon generated descriptors in the first place, not a minor
+   implementation detail. (Added by the Experiment A follow-up below; see there for the two
+   distinct splits — io.sundr.model and io.sundr.builder — that made the single-artifact
+   exclusion insufficient and forced the full 13-artifact list.)
 3. Aggregator/skip cost: 0 poms needed <moditect.skip> — better than the brief anticipated.
 4. Does moditect honour osgi.export: could not be tested — no descriptor was ever generated for
    the module pair in question. Structurally, jdeps's exports-from-physical-contents design means
@@ -419,8 +469,8 @@ Added `<jpms.module.name>io.fabric8.kubernetes.model.common</jpms.module.name>` 
 kubernetes-model-common/pom.xml (same treatment as the other 7 modules), then installed only
 that one module (single-module install, not the prohibited full-reactor install):
 
-  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 | tail -20
-  ...
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 \
+      | grep -E 'Modules .* export package|BUILD (FAILURE|SUCCESS)'
   [ERROR] Modules sundr.model.utils and sundr.model.base export package io.sundr.model to module sundr.codegen.apt
   [INFO] BUILD FAILURE
 
@@ -432,9 +482,10 @@ via moditect's <exclusions> (List<org.apache.maven.model.Exclusion>, confirmed v
 AddModuleInfoMojo.class) surfaced a second, independent split (io.sundr.builder, shipped by both
 builder-annotations and sundr-core):
 
-  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 | tail -10
-  ...
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 \
+      | grep -E 'Modules .* export package|BUILD (FAILURE|SUCCESS)'
   [ERROR] Modules builder.annotations and sundr.core export package io.sundr.builder to module sundr.codegen.apt
+  [INFO] BUILD FAILURE
 
 Whack-a-mole exclusion was abandoned in favor of excluding the entire provided-scope Sundr/lombok
 closure at once (13 artifacts: sundr-core, builder-annotations, sundr-codegen-api,
@@ -445,27 +496,23 @@ reading that pom directly). These are compile-time/annotation-processing-only de
 referenced by the compiled bytecode at runtme, so excluding them from moditect's own module-path
 computation (not from the real Maven dependency graph) is sound:
 
-  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 | tail -15
-  ...
-  [INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-model-common ---
-  [INFO] Running jdeps --generate-module-info .../kubernetes-model-common/target/moditect --add-modules com.fasterxml.jackson.databind,com.fasterxml.jackson.annotation,org.slf4j,com.fasterxml.jackson.core --module-path .../jackson-databind-2.21.4.jar:.../jackson-annotations-2.21.jar:.../slf4j-api-2.0.18.jar:.../jackson-core-2.21.4.jar --multi-release 9 .../kubernetes-model-common-999-SNAPSHOT.jar
-  writing to .../kubernetes-model-common/target/moditect/io.fabric8.kubernetes.model.common/versions/9/module-info.java
-  [INFO] Created module descriptor at .../kubernetes-model-common/target/moditect/generated-sources/io.fabric8.kubernetes.model.common/module-info.java
-  [INFO]
-  [INFO] --- install:3.1.4:install (default-install) @ kubernetes-model-common ---
-  [INFO] Installing .../kubernetes-model-common-999-SNAPSHOT.jar to /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-common install -DskipTests 2>&1 \
+      | grep -E 'Running jdeps --generate-module-info|writing to|Created module descriptor|Installing .*kubernetes-model-common-999-SNAPSHOT\.jar to|BUILD (FAILURE|SUCCESS)'
+  [INFO] Running jdeps --generate-module-info /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-common/target/moditect --add-modules com.fasterxml.jackson.databind,com.fasterxml.jackson.annotation,org.slf4j,com.fasterxml.jackson.core --module-path /home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.21.4/jackson-databind-2.21.4.jar:/home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar:/home/austek/.m2/repository/org/slf4j/slf4j-api/2.0.18/slf4j-api-2.0.18.jar:/home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.21.4/jackson-core-2.21.4.jar --multi-release 9 /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-common/target/moditect/8759267721065957960/kubernetes-model-common-999-SNAPSHOT.jar
+  writing to /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-common/target/moditect/io.fabric8.kubernetes.model.common/versions/9/module-info.java
+  [INFO] Created module descriptor at /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-common/target/moditect/generated-sources/io.fabric8.kubernetes.model.common/module-info.java
+  [INFO] Installing /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-common/target/kubernetes-model-common-999-SNAPSHOT.jar to /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar
   [INFO] BUILD SUCCESS
 
 kubernetes-model-common now carries a real, correctly-named descriptor in ~/.m2. Rebuilding
 kubernetes-model-core alone (package, not install):
 
-  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests 2>&1 | tail -15
-  ...
+  $ ./scripts/mvnj -pl kubernetes-model-generator/kubernetes-model-core package -DskipTests 2>&1 \
+      | grep -E 'add-module-info \(add-module-info\) @ kubernetes-model-core|Running jdeps --generate-module-info|writing to|Created module descriptor|BUILD (FAILURE|SUCCESS)'
   [INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-model-core ---
-  [INFO] Running jdeps --generate-module-info .../kubernetes-model-core/target/moditect --add-modules io.fabric8.kubernetes.model.common,com.fasterxml.jackson.databind,com.fasterxml.jackson.annotation,org.slf4j,com.fasterxml.jackson.core --module-path /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar:.../jackson-databind-2.21.4.jar:.../jackson-annotations-2.21.jar:.../slf4j-api-2.0.18.jar:.../jackson-core-2.21.4.jar --multi-release 9 .../kubernetes-model-core-999-SNAPSHOT.jar
-  writing to .../kubernetes-model-core/target/moditect/io.fabric8.kubernetes.model.core/versions/9/module-info.java
-  [INFO] Created module descriptor at .../kubernetes-model-core/target/moditect/generated-sources/io.fabric8.kubernetes.model.core/module-info.java
-  [INFO] ------------------------------------------------------------------------
+  [INFO] Running jdeps --generate-module-info /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/moditect --add-modules io.fabric8.kubernetes.model.common,com.fasterxml.jackson.databind,com.fasterxml.jackson.annotation,org.slf4j,com.fasterxml.jackson.core --module-path /home/austek/.m2/repository/io/fabric8/kubernetes-model-common/999-SNAPSHOT/kubernetes-model-common-999-SNAPSHOT.jar:/home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.21.4/jackson-databind-2.21.4.jar:/home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.21/jackson-annotations-2.21.jar:/home/austek/.m2/repository/org/slf4j/slf4j-api/2.0.18/slf4j-api-2.0.18.jar:/home/austek/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.21.4/jackson-core-2.21.4.jar --multi-release 9 /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/moditect/12855689343392689189/kubernetes-model-core-999-SNAPSHOT.jar
+  writing to /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/moditect/io.fabric8.kubernetes.model.core/versions/9/module-info.java
+  [INFO] Created module descriptor at /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-model-generator/kubernetes-model-core/target/moditect/generated-sources/io.fabric8.kubernetes.model.core/module-info.java
   [INFO] BUILD SUCCESS
 
 **VERDICT: Experiment A succeeds unambiguously.** jdeps now correctly picks up
@@ -571,6 +618,7 @@ zjsonpatch (the other module with a Jackson dependency) still builds clean under
 9`:
 
   $ ./scripts/mvnj -pl zjsonpatch package -DskipTests 2>&1 | tail -8
+  ...
   [INFO] BUILD SUCCESS
 
 ## Updated summary of measurements (supersedes the "1. Coverage" line above)
@@ -584,3 +632,10 @@ zjsonpatch (the other module with a Jackson dependency) still builds clean under
    kubernetes-client-api depends on) would also bootstrap cleanly is not tested and should not be
    assumed either way — each may hit its own Sundr-toolchain split package requiring its own
    exclusion list, as kubernetes-model-common did here.
+
+   Boundary note for the naming-cost figures in the "Summary" section above ("6 new lines" / "7
+   total"): those counts describe the original 7-module slice only. Getting Experiment A to work
+   required naming an 8th module, kubernetes-model-common, outside that slice — it is not one of
+   the 7 target modules and is not counted in the "6 new / 7 total" figure. A reader restating
+   that figure should read it as "6 of the 7 original slice modules, plus a further 8th module's
+   worth of naming and exclusion cost paid to unblock just one of them."
