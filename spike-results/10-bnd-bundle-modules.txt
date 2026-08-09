@@ -157,12 +157,16 @@ Divergence from the brief's prediction: the brief expected
     dependency), WRONG module name (raw artifactId, no dots — see "dependency module names bnd
     had to guess" below for why).
   - No requires entry for openshift-model-config AT ALL, transitive or otherwise. Verified this
-    is not a bug: openshift-model's generated sources
-    (kubernetes-model-generator/openshift-model/src/generated/java) contain zero references to
-    any io.fabric8.openshift.api.model.config class, even though openshift-model-config is a
-    declared Maven <dependency>. bnd's Import-Package (and hence requires) is computed from
-    actual bytecode references, so it correctly omits an unused dependency. The brief's prediction
-    assumed a code-level dependency that does not exist in this codebase's current class layout.
+    is not a bug — openshift-model's generated sources contain zero references to any
+    io.fabric8.openshift.api.model.config class, even though openshift-model-config is a declared
+    Maven <dependency>:
+
+      $ grep -rn "openshift.api.model.config" kubernetes-model-generator/openshift-model/src/generated/java/
+      (no output)
+
+    bnd's Import-Package (and hence requires) is computed from actual bytecode references, so it
+    correctly omits an unused dependency. The brief's prediction assumed a code-level dependency
+    that does not exist in this codebase's current class layout.
 
 ### requires static inference (spec edge case 5)
 
@@ -199,17 +203,24 @@ matches on both:
       | grep -i "Can't find a module name for imported package" | sort -u
   (no output)
 
-  $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model package -DskipTests -X 2>&1 \
-      | grep -i "Can't find a module name for imported package" | sort -u
+  $ ./scripts/mvnj -pl kubernetes-model-generator/openshift-model package -DskipTests -X > /tmp/openshift-model-x.log 2>&1
+  $ grep -i "Can't find a module name for imported package" /tmp/openshift-model-x.log | sort -u
   (no output)
 
 Read plainly this would look like "empty list, good result" — but it is not. For
 kubernetes-model-core the debug build never reaches that check at all; it crashes first (see
 above). For openshift-model the build succeeds, but the string still never appears, because bnd
 never fails to find *a* name — it falls back to a naive, frequently WRONG guess instead of
-reporting failure. That guess is visible in the same debug log under a different message:
+reporting failure. That guess is visible in the same /tmp/openshift-model-x.log, under a
+different message:
 
-  [DEBUG] begin aQute.bnd.plugin.jpms.JPMSModuleInfoPlugin@326a6d81
+  $ grep -n "JPMSModuleInfoPlugin@" /tmp/openshift-model-x.log
+  21509:[DEBUG] begin aQute.bnd.plugin.jpms.JPMSModuleInfoPlugin@508cd7c9
+
+  $ grep -n "Using module name" /tmp/openshift-model-x.log | sort -u
+  (line numbers stripped below for readability; content and order unchanged)
+
+  [DEBUG] begin aQute.bnd.plugin.jpms.JPMSModuleInfoPlugin@508cd7c9
   [DEBUG] Using module name 'kubernetes-model-core' for: Jar:kubernetes-model-core
   [DEBUG] Using module name 'kubernetes-model-common' for: Jar:kubernetes-model-common
   [DEBUG] Using module name 'slf4j-api' for: Jar:slf4j-api

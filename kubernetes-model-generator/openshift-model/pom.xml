@@ -34,8 +34,7 @@
     <clone-kube>true</clone-kube>
     <osgi.import>*</osgi.import>
     <osgi.export>
-      <!-- config.* lives in openshift-model-config; excluded so bnd does not embed it
-           (would create a JPMS split package on the module path) -->
+      <!-- config.* lives in openshift-model-config; exclude or JPMS sees a split package. -->
       !io.fabric8.openshift.api.model.config,
       !io.fabric8.openshift.api.model.config.*,
       io.fabric8.openshift.api.model**,

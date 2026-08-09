@@ -148,9 +148,7 @@
     <exec.maven-plugin.version>3.6.3</exec.maven-plugin.version>
     <maven.compiler.plugin.version>3.15.0</maven.compiler.plugin.version>
     <maven.bundle.plugin.version>5.1.9</maven.bundle.plugin.version>
-    <!-- JPMS module name; bnd reads Automatic-Module-Name to name the generated module.
-         ${replace;...} is a bnd macro, not a Maven expression: Maven leaves it literal,
-         bnd evaluates it. Override per module for already-published names. -->
+    <!-- bnd macro, not a Maven expression: Maven leaves it literal, bnd evaluates it. -->
     <jpms.module.name>io.fabric8.${replace;${project.artifactId};-;.}</jpms.module.name>
     <maven.buildhelper.plugin.version>3.6.1</maven.buildhelper.plugin.version>
     <maven.jar.plugin.version>3.5.1</maven.jar.plugin.version>
