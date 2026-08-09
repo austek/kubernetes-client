@@ -1,0 +1,392 @@
+Task 6: Cross-cutting checks — JDK stability, reproducible builds, uberjar
+============================================================================
+
+Method note: this task does NOT diff against the historical 10-bnd-bundle-modules.txt
+or 20-moditect-all-modules.txt captures. Task 5's Experiment A permanently installed a
+moditect-built kubernetes-model-common (carrying a real module-info.class) into ~/.m2.
+Any module depending on it now resolves a named module where the historical captures
+saw an unnameable 999-SNAPSHOT jar. Diffing a fresh build against those older files
+would attribute ~/.m2 drift to the build JDK and produce a false positive. Instead,
+each arm below was captured on JDK 17 and JDK 11 back to back in this session, and
+those two captures were diffed against each other — isolating the build JDK as the
+only changed variable.
+
+Question 1: are generated descriptors stable across the build JDK (11 vs 17)?
+===============================================================================
+
+--- bnd arm (spike/jpms-bnd) ---
+
+  $ git checkout spike/jpms-bnd
+  Switched to branch 'spike/jpms-bnd'
+
+  $ SPIKE_JDK=17 ./scripts/mvnj -pl zjsonpatch,kubernetes-model-generator/kubernetes-model-core,kubernetes-model-generator/openshift-model,kubernetes-model-generator/openshift-model-config clean package -DskipTests 2>&1 | tee /tmp/bnd-jdk17-build.log | tail -30
+  (tail -30 shown; last 5 lines of that tail, which equal the final 5 lines of the full
+  log since tailing is idempotent on the tail end:)
+  [ERROR] For more information about the errors and possible solutions, please read the following articles:
+  [ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException
+  [ERROR]
+  [ERROR] After correcting the problems, you can resume the build with the command
+  [ERROR]   mvn <args> -rf :kubernetes-model-core
+
+  Reactor summary (JDK 17), re-derived from /tmp/bnd-jdk17-build.log:
+  [INFO] Fabric8 :: zjsonpatch .............................. SUCCESS [  1.978 s]
+  [INFO] Fabric8 :: Kubernetes Model :: Core ................ FAILURE [ 10.172 s]
+  [INFO] Fabric8 :: OpenShift Model :: Config ............... SKIPPED
+  [INFO] Fabric8 :: OpenShift Model :: Core ................. SKIPPED
+
+  $ SPIKE_JDK=11 ./scripts/mvnj -pl zjsonpatch,kubernetes-model-generator/kubernetes-model-core,kubernetes-model-generator/openshift-model,kubernetes-model-generator/openshift-model-config clean package -DskipTests 2>&1 | tee /tmp/bnd-jdk11-build.log | tail -30
+  (tail -30 shown; last 5 lines reproduced below)
+  [ERROR] For more information about the errors and possible solutions, please read the following articles:
+  [ERROR] [Help 1] http://cwiki.apache.org/confluence/display/MAVEN/MojoExecutionException
+  [ERROR]
+  [ERROR] After correcting the problems, you can resume the build with the command
+  [ERROR]   mvn <args> -rf :kubernetes-model-core
+
+  Reactor summary (JDK 11), re-derived from /tmp/bnd-jdk11-build.log:
+  [INFO] Fabric8 :: zjsonpatch .............................. SUCCESS [  2.115 s]
+  [INFO] Fabric8 :: Kubernetes Model :: Core ................ FAILURE [ 10.371 s]
+  [INFO] Fabric8 :: OpenShift Model :: Config ............... SKIPPED
+  [INFO] Fabric8 :: OpenShift Model :: Core ................. SKIPPED
+
+  Identical success/failure/skip pattern on both JDKs. kubernetes-model-core fails to
+  build under this arm on BOTH JDKs — this is the bndlib 6.3.1 JPMSModuleInfoPlugin NPE
+  documented in Task 2/spike-results/10-bnd-bundle-modules.txt ("Cannot invoke
+  String.hashCode() because <local2> is null"), triggered by kubernetes-model-core's
+  spec-correct osgi.require-capability filter:= directive. It is consistent across both
+  JDK captures, so it does not affect the JDK-stability comparison — this is a coverage
+  gap already measured in Task 2, not a new JDK-induced difference. openshift-model and
+  openshift-model-config are SKIPPED (never rebuilt) on both JDKs because Maven aborts
+  the reactor at the first failing module; their jars in target/ are stale leftovers
+  from before this task, present identically on both JDKs.
+
+  $ ./scripts/dump-module-descriptors.sh zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar kubernetes-model-generator/kubernetes-model-core/target/kubernetes-model-core-999-SNAPSHOT.jar kubernetes-model-generator/openshift-model/target/openshift-model-999-SNAPSHOT.jar kubernetes-model-generator/openshift-model-config/target/openshift-model-config-999-SNAPSHOT.jar > /tmp/bnd-jdk17.txt
+  (captured after the JDK 17 build above; dump tool itself always pins JDK 17 per script header)
+
+  (same dump command run again after the JDK 11 build, capturing into /tmp/bnd-jdk11.txt)
+
+  $ diff -u /tmp/bnd-jdk17.txt /tmp/bnd-jdk11.txt
+  (no output)
+
+  $ echo "diff exit=$?"
+  diff exit=0
+
+  VERDICT: bnd arm descriptors are byte-identical between JDK 17 and JDK 11. The only
+  module that actually carries a descriptor in this slice (zjsonpatch) is unaffected by
+  build JDK — consistent with bnd's DEFAULT_MODULE_EE resolving to the fixed
+  EE.JavaSE_11 constant rather than the running JDK.
+
+--- moditect arm (spike/jpms-moditect) ---
+
+  $ git checkout spike/jpms-moditect
+  Switched to branch 'spike/jpms-moditect'
+
+  $ SPIKE_JDK=17 ./scripts/mvnj -pl zjsonpatch,kubernetes-model-generator/kubernetes-model-common,kubernetes-model-generator/kubernetes-model-core,kubernetes-model-generator/openshift-model,kubernetes-model-generator/openshift-model-config,kubernetes-client-api,kubernetes-client,httpclient-jdk clean package -DskipTests 2>&1 | tee /tmp/mod-jdk17-build.log | tail -60
+
+  Reactor summary (JDK 17), re-derived from /tmp/mod-jdk17-build.log:
+  [INFO] Fabric8 :: zjsonpatch .............................. SUCCESS [  2.337 s]
+  [INFO] Fabric8 :: Kubernetes Model :: Common .............. SUCCESS [  1.958 s]
+  [INFO] Fabric8 :: Kubernetes Model :: Core ................ SUCCESS [ 10.923 s]
+  [INFO] Fabric8 :: OpenShift Model :: Config ............... SUCCESS [  7.450 s]
+  [INFO] Fabric8 :: OpenShift Model :: Core ................. FAILURE [  5.478 s]
+  [INFO] Fabric8 :: Kubernetes :: Java Client API ........... SKIPPED
+  [INFO] Fabric8 :: Kubernetes :: HttpClient :: JDK ......... SKIPPED
+  [INFO] Fabric8 :: Kubernetes :: Java Client ............... SKIPPED
+
+  openshift-model (labelled "OpenShift Model :: Core" in the reactor) fails with, verbatim
+  from /tmp/mod-jdk17-build.log:
+  [ERROR] Failed to execute goal org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info (add-module-info) on project openshift-model: Execution add-module-info of goal org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info failed: No assignedModuleName provided for jar with invalid module name: /home/austek/.m2/repository/io/fabric8/kubernetes-model-rbac/999-SNAPSHOT/kubernetes-model-rbac-999-SNAPSHOT.jar -> [Help 1]
+
+  $ SPIKE_JDK=11 ./scripts/mvnj -pl zjsonpatch,kubernetes-model-generator/kubernetes-model-common,kubernetes-model-generator/kubernetes-model-core,kubernetes-model-generator/openshift-model,kubernetes-model-generator/openshift-model-config,kubernetes-client-api,kubernetes-client,httpclient-jdk clean package -DskipTests 2>&1 | tee /tmp/mod-jdk11-build.log | tail -60
+
+  Reactor summary (JDK 11), re-derived from /tmp/mod-jdk11-build.log:
+  [INFO] Fabric8 :: zjsonpatch .............................. SUCCESS [  2.317 s]
+  [INFO] Fabric8 :: Kubernetes Model :: Common .............. SUCCESS [  2.118 s]
+  [INFO] Fabric8 :: Kubernetes Model :: Core ................ SUCCESS [ 10.388 s]
+  [INFO] Fabric8 :: OpenShift Model :: Config ............... SUCCESS [  7.560 s]
+  [INFO] Fabric8 :: OpenShift Model :: Core ................. FAILURE [  5.792 s]
+  [INFO] Fabric8 :: Kubernetes :: Java Client API ........... SKIPPED
+  [INFO] Fabric8 :: Kubernetes :: HttpClient :: JDK ......... SKIPPED
+  [INFO] Fabric8 :: Kubernetes :: Java Client ............... SKIPPED
+
+  Same success/failure/skip pattern as JDK 17, same failing module, same root cause
+  (kubernetes-model-rbac unresolvable to a legal module name — a ~/.m2-state issue from
+  the "999-SNAPSHOT" version string, not something this task's JDK swap changed).
+  kubernetes-model-common is in this module list only because Task 5's Experiment A
+  requires it to resolve the others; it is not itself one of the spec's original 7
+  targets. 4 of 8 modules build (zjsonpatch, kubernetes-model-common,
+  kubernetes-model-core, openshift-model-config); the same 4 fail/skip on both JDKs.
+
+  $ diff -u /tmp/mod-jdk17.txt /tmp/mod-jdk11.txt
+  (no output)
+
+  $ echo "diff exit=$?"
+  diff exit=0
+
+  Sanity check — both dump files are 61 lines and hash identically. This shell's bare
+  `wc` is wrapped (same rtk token-optimization hook noted for `grep` in
+  10-bnd-bundle-modules.txt) and rewrites its own output (strips leading paths, replaces
+  "total" with "Σ"); /usr/bin/wc directly gives the genuine, unaltered coreutils output
+  used below:
+
+  $ /usr/bin/wc -l /tmp/mod-jdk17.txt /tmp/mod-jdk11.txt
+     61 /tmp/mod-jdk17.txt
+     61 /tmp/mod-jdk11.txt
+    122 total
+
+  $ md5sum /tmp/mod-jdk17.txt /tmp/mod-jdk11.txt
+  218439afb341fef6d9e5717fda95e438  /tmp/mod-jdk17.txt
+  218439afb341fef6d9e5717fda95e438  /tmp/mod-jdk11.txt
+
+  VERDICT: moditect arm descriptors are ALSO byte-identical between JDK 17 and JDK 11,
+  for the modules that build (zjsonpatch, kubernetes-model-common, kubernetes-model-core,
+  openshift-model-config). This is a genuine, positive result — going in, jdeps running
+  from the invoking JDK made this arm the more likely of the two to vary (per the task
+  brief), but it did not vary for this dependency closure and these two JDKs. This does
+  NOT prove stability holds for every module or every JDK pair (e.g. 17 vs 21 was not
+  tested here, and the modules that fail to build were not exercised at all) — it proves
+  it for the 4 modules that build, on 11 vs 17.
+
+Question 1 overall answer: for both arms, descriptor content that is actually produced
+is byte-identical across JDK 11 and JDK 17. Build failures are consistent across both
+JDKs in both arms (same modules succeed, same modules fail, for the same reasons) — so
+they are a coverage limitation already established in Tasks 2 and 5, not a JDK-stability
+finding. Neither arm shows evidence of the golden-file approach flapping across this
+part of the CI matrix (11/17). JDK 21 was not tested (out of scope for this task's
+literal commands) and remains an open question for the CI matrix as a whole.
+
+Question 2: does adding a descriptor break jar reproducibility? (spec edge case 7)
+=====================================================================================
+
+  $ git checkout spike/jpms-bnd
+  Switched to branch 'spike/jpms-bnd'
+
+  $ ./scripts/mvnj -pl zjsonpatch clean package -DskipTests 2>&1 | tee /tmp/repro-a-build.log | tail -15
+  [INFO] Tests are skipped.
+  [INFO]
+  [INFO] --- bundle:5.1.9:bundle (default-bundle) @ zjsonpatch ---
+  [INFO] Building bundle: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar
+  [INFO] Writing manifest: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/classes/META-INF/MANIFEST.MF
+  [INFO]
+  [INFO] --- bundle:5.1.9:bundle (bundle) @ zjsonpatch ---
+  [INFO] Building bundle: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar
+  [INFO] Writing manifest: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/classes/META-INF/MANIFEST.MF
+  [INFO] ------------------------------------------------------------------------
+  [INFO] BUILD SUCCESS
+  [INFO] ------------------------------------------------------------------------
+  [INFO] Total time:  2.697 s
+  [INFO] Finished at: 2026-08-09T08:26:05+01:00
+  [INFO] ------------------------------------------------------------------------
+
+  $ cp zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar /tmp/repro-a.jar
+
+  $ ./scripts/mvnj -pl zjsonpatch clean package -DskipTests 2>&1 | tee /tmp/repro-b-build.log | tail -15
+  [INFO] Tests are skipped.
+  [INFO]
+  [INFO] --- bundle:5.1.9:bundle (default-bundle) @ zjsonpatch ---
+  [INFO] Building bundle: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar
+  [INFO] Writing manifest: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/classes/META-INF/MANIFEST.MF
+  [INFO]
+  [INFO] --- bundle:5.1.9:bundle (bundle) @ zjsonpatch ---
+  [INFO] Building bundle: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar
+  [INFO] Writing manifest: /home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/zjsonpatch/target/classes/META-INF/MANIFEST.MF
+  [INFO] ------------------------------------------------------------------------
+  [INFO] BUILD SUCCESS
+  [INFO] ------------------------------------------------------------------------
+  [INFO] Total time:  2.865 s
+  [INFO] Finished at: 2026-08-09T08:26:18+01:00
+  [INFO] ------------------------------------------------------------------------
+
+  $ cp zjsonpatch/target/zjsonpatch-999-SNAPSHOT.jar /tmp/repro-b.jar
+
+  $ if cmp -s /tmp/repro-a.jar /tmp/repro-b.jar; then echo "REPRODUCIBLE"; else echo "NOT REPRODUCIBLE"; fi
+  REPRODUCIBLE
+
+  VERDICT: REPRODUCIBLE. The two independently-built jars (including their
+  module-info.class, written by bnd's JPMSModuleInfoPlugin, and stamped via
+  analyzer.lastModified()) are byte-for-byte identical (cmp -s reports no difference).
+  Because the full jars already match, there was no need for the fallback step of
+  hashing the module-info.class entry in isolation, or of re-running the comparison on
+  spike/jpms-harness — both are only required when the full-jar cmp fails, which it did
+  not. The root pom's <_reproducible>true</_reproducible> plus bnd's timestamp handling
+  holds up with a module descriptor present.
+
+Question 3: is kubernetes-openshift-uberjar correctly left without a descriptor by
+BOTH arms? (spec edge case 3)
+=====================================================================================
+
+--- bnd arm ---
+
+  $ git checkout spike/jpms-bnd
+  Switched to branch 'spike/jpms-bnd'
+
+  $ ./scripts/mvnj -pl uberjar clean package -DskipTests 2>&1 | tee /tmp/uberjar-bnd-build.log | tail -10
+  [WARNING] otherwise try to manually exclude artifacts based on
+  [WARNING] mvn dependency:tree -Ddetail=true and the above output.
+  [WARNING] See https://maven.apache.org/plugins/maven-shade-plugin/
+  [INFO] Attaching shaded artifact.
+  [INFO] ------------------------------------------------------------------------
+  [INFO] BUILD SUCCESS
+  [INFO] ------------------------------------------------------------------------
+  [INFO] Total time:  19.694 s
+  [INFO] Finished at: 2026-08-09T08:30:05+01:00
+  [INFO] ------------------------------------------------------------------------
+
+  $ ./scripts/dump-module-descriptors.sh uberjar/target/kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  === kubernetes-openshift-uberjar-999-SNAPSHOT.jar ===
+  NO module-info.class (automatic module)
+  Unable to derive module descriptor for: uberjar/target/kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  kubernetes.openshift.uberjar.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+  Result for bnd: NO module-info.class, as expected (matching the brief's expected
+  output exactly). Investigated WHY: the Felix maven-bundle-plugin (which carries bnd's
+  JPMSModuleInfoPlugin) only binds to Maven's lifecycle for packaging=bundle.
+  uberjar/pom.xml declares packaging=jar, so the bundle plugin's mojo never executes at
+  all —
+
+  $ /usr/bin/grep "bundle\|moditect" /tmp/uberjar-bnd-build.log
+  (no output — confirmed no bundle-plugin or moditect-plugin goal ran during this build;
+  this shell's bare `grep` is wrapped by an rtk token-optimization hook that prepends
+  line numbers even without -n, so /usr/bin/grep was used directly here to avoid any
+  doubt about whether the wrapper could also suppress or alter a true negative — it
+  cannot: a real absence of matches is exit 1, no output, on both the wrapped and
+  unwrapped binary)
+
+  This means bnd's "exclusion" of the uberjar is INCIDENTAL, a side effect of
+  packaging=jar never entering the bundle lifecycle — not an explicit skip.
+
+--- moditect arm ---
+
+  $ git checkout spike/jpms-moditect
+  Switched to branch 'spike/jpms-moditect'
+
+  $ ./scripts/mvnj -pl uberjar clean package -DskipTests > /tmp/uberjar-moditect-build2.log 2>&1; echo "mvn exit=$?"
+  mvn exit=1
+
+  $ grep -n "add-module-info (add-module-info) @ kubernetes-openshift-uberjar\|BUILD FAILURE\|BUILD SUCCESS" /tmp/uberjar-moditect-build2.log
+  563:[INFO] --- moditect:1.3.0.Final:add-module-info (add-module-info) @ kubernetes-openshift-uberjar ---
+  565:[INFO] BUILD FAILURE
+
+  $ grep "Failed to execute goal org.moditect" /tmp/uberjar-moditect-build2.log
+  570:[ERROR] Failed to execute goal org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info (add-module-info) on project kubernetes-openshift-uberjar: Execution add-module-info of goal org.moditect:moditect-maven-plugin:1.3.0.Final:add-module-info failed: No assignedModuleName provided for jar with invalid module name: /home/austek/.m2/repository/io/fabric8/kubernetes-model-core/999-SNAPSHOT/kubernetes-model-core-999-SNAPSHOT.jar -> [Help 1]
+
+  (line numbers above are prefixed by this shell's `grep` wrapper — an rtk
+  token-optimization hook per CLAUDE.md — even though -n was not passed; they are the
+  real source line numbers from the log, not something added by hand)
+
+  DEFECT FOUND, moditect arm: the build FAILS OUTRIGHT (exit 1) — it does not merely
+  skip the descriptor. moditect-maven-plugin's add-module-info execution is bound
+  directly in the root pom's <build><plugins> (line ~1430), unconditionally, with no
+  packaging guard and no per-module exclusion for kubernetes-openshift-uberjar (checked
+  uberjar/pom.xml directly — no <skip> or plugin override there). So moditect DOES
+  attempt to process the shaded/relocated uberjar; it only fails to complete because one
+  of the uberjar's declared dependencies (kubernetes-model-core, resolved from ~/.m2 for
+  this single-module `-pl uberjar` build) does not carry a real module-info and its
+  version string ("999-SNAPSHOT") cannot form a legal automatic module name either. This
+  is the same "999-SNAPSHOT can't auto-name" failure mode documented for other modules
+  in Task 5, now hitting the uberjar via its dependency closure.
+
+  This means: unlike the bnd arm, moditect's non-interference with the uberjar is NOT
+  structural — it happens to fail via this dependency-resolution error before it would
+  otherwise have gone on to try to synthesize and write a descriptor onto a jar that
+  shades and relocates every model package. If that one dependency's module name were
+  resolvable, there is no visible guard in the moditect execution config (no
+  <assignedModuleName> for kubernetes-openshift-uberjar's own artifact, no exclusion
+  entry naming it) that would stop moditect from writing a module-info onto the
+  uberjar itself. The exclusion this arm needs is not explicit; it is presently working
+  only by accident, and the accident manifests as a build failure, not a clean skip.
+
+  The shade step itself (which runs before the moditect step in the package phase)
+  still produces a shaded jar on disk before the build aborts:
+
+  $ ./scripts/dump-module-descriptors.sh uberjar/target/kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  === kubernetes-openshift-uberjar-999-SNAPSHOT.jar ===
+  NO module-info.class (automatic module)
+  Unable to derive module descriptor for: uberjar/target/kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  kubernetes.openshift.uberjar.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+  Identical output to the bnd arm's uberjar dump above — same "999" automatic-module
+  naming failure, since both arms' shade configuration is defined once in
+  uberjar/pom.xml, unaffected by which arm is checked out.
+
+  So the artifact that exists on disk after a failed moditect-arm build has no
+  descriptor either, matching the bnd arm's result — but the overall `mvn package`
+  invocation for this module fails on this arm, which the bnd arm's does not. A CI
+  pipeline building the moditect arm end-to-end would need either a fix to the
+  dependency's module-naming problem or an explicit exclusion added for this module —
+  today it has neither.
+
+Split-package evidence justifying the exclusion (both arms' shaded jar vs a real,
+moditect-built kubernetes-model-core carrying an actual module-info.class). Jars were
+copied to per-arm directories under /tmp, preserving their real basenames exactly
+(kubernetes-openshift-uberjar-999-SNAPSHOT.jar, kubernetes-model-core-999-SNAPSHOT.jar)
+so the scan output reports the real artifact names, not a renamed stand-in:
+
+  $ ./scripts/scan-split-packages.sh /tmp/t6-bnd/kubernetes-openshift-uberjar-999-SNAPSHOT.jar /tmp/t6-moditect/kubernetes-model-core-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model.clusterapi.core.v1beta1 kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model.runtime kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model.version kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.internal kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+
+  $ echo "scan exit=$?"
+  scan exit=1
+
+  $ ./scripts/scan-split-packages.sh /tmp/t6-moditect/kubernetes-openshift-uberjar-999-SNAPSHOT.jar /tmp/t6-moditect/kubernetes-model-core-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model.clusterapi.core.v1beta1 kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model.runtime kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.api.model.version kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+  SPLIT io.fabric8.kubernetes.internal kubernetes-model-core-999-SNAPSHOT.jar kubernetes-openshift-uberjar-999-SNAPSHOT.jar
+
+  $ echo "scan exit=$?"
+  scan exit=1
+
+  (the bnd arm's own kubernetes-model-core never builds — see Question 1 above — so the
+  model-core jar used for both scans above is the moditect-built one, the only jar in
+  either arm that actually carries the real io.fabric8.kubernetes.model.core module and
+  its real exported-package list; the uberjar side of each comparison is that arm's own
+  build)
+
+  All 6 of kubernetes-model-core's exported packages are duplicated, unrelocated, inside
+  the primary (non-"-versioned"-classified) uberjar artifact for both arms — confirmed by
+  reading uberjar/pom.xml: the "uberjar" shade execution (which produces the plain
+  kubernetes-openshift-uberjar-999-SNAPSHOT.jar tested above) declares no <relocations>
+  at all; only the second, separately-classified "relocation" execution
+  (kubernetes-openshift-uberjar-999-SNAPSHOT-versioned.jar) relocates packages. If either
+  arm treated the plain uberjar jar as a named module, this would be an illegal split
+  package against kubernetes-model-core (and against every other model module it
+  shades). This is the concrete evidence for why the uberjar can never be a valid named
+  module under either mechanism.
+
+Question 3 overall answer: bnd correctly leaves the uberjar without a descriptor, but
+only because packaging=jar structurally keeps it out of the OSGi bundle lifecycle — the
+exclusion is incidental, not a deliberate skip. moditect's build for this module FAILS
+outright rather than cleanly skipping; the artifact that ends up on disk has no
+descriptor, but only because an unrelated dependency-naming defect aborts the build
+before moditect gets a chance to try. Neither arm has an explicit, intentional exclusion
+for kubernetes-openshift-uberjar today; both rely on incidental behavior, and the
+moditect arm's incidental behavior is a hard build failure, which is more fragile than
+the bnd arm's silent no-op.
+
+Summary
+=======
+1. JDK stability (11 vs 17): both arms produce byte-identical descriptor content for
+   the modules that build successfully. Build failures are consistent across JDKs
+   within each arm (same modules, same causes) and were already characterized in Tasks
+   2 and 5 — they are not JDK-induced. JDK 21 was not exercised by this task.
+2. Reproducibility: REPRODUCIBLE. bnd's descriptor-carrying zjsonpatch jar builds
+   byte-identical across two independent invocations; no reproducibility regression
+   from adding module-info.class.
+3. Uberjar: both arms leave kubernetes-openshift-uberjar without a module-info.class in
+   the artifact that ends up on disk, but neither does so by deliberate design — bnd's
+   omission is a structural consequence of packaging=jar, and moditect's build for this
+   module fails outright due to an unrelated dependency-naming defect before it would
+   otherwise attempt to write one. Split-package scanning confirms why a descriptor
+   would be wrong if either mechanism ever succeeded in writing one: all 6 of
+   kubernetes-model-core's packages are duplicated, unrelocated, inside the uberjar.
+
+Scope reminder: this task and Task 4 show that descriptors/provides clauses are
+generated; neither proves ServiceLoader resolves them at runtime from a real module
+path. That is Phase 6 / verification-layer-2 work, out of scope here.
