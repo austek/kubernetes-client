@@ -77,6 +77,20 @@ acceptance criteria; 2-8 are sequenced behind the packaging decision above.
    moves karaf's `feature.xml` coordinates, so this gate has to be in place before that change
    lands, not after.
 
+To reproduce any of the measurements: the tooling is on
+[spike/jpms-harness](https://github.com/austek/kubernetes-client/tree/spike/jpms-harness) —
+a descriptor dump normalised for byte-stable diffing, a split-package scan, and JDK pinning,
+since both arms had to be built under a fixed JDK to rule out environmental drift. Raw evidence
+per arm: [20-moditect-all-modules.txt](https://github.com/austek/kubernetes-client/blob/spike/jpms-moditect/spike-results/20-moditect-all-modules.txt)
+for moditect, and the `10-`/`11-`/`12-`/`30-` files alongside
+[40-comparison.md](https://github.com/austek/kubernetes-client/blob/spike/jpms-bnd/spike-results/40-comparison.md)
+for bnd and the cross-cutting checks.
+
+Tasks 5 and 8 have a head start: #8028 fixes the two split packages that exist today
+(`openshift-model` shipping `openshift-model-config`'s classes, and
+`Fabric8ClientInjectionHandler` sharing a package with `kube-api-test` core). Both are defects
+independent of the mechanism choice.
+
 <<< END COMMENT 2
 
 ---
