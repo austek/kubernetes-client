@@ -3,6 +3,7 @@
 # JPMS forbids split packages on the module path; OSGi tolerated them.
 # Pins the JDK itself (SPIKE_JDK, default 17) so callers cannot forget.
 set -euo pipefail
+export LC_ALL=C
 . "$(dirname "$0")/jdk-select.sh"
 
 if [ "$#" -eq 0 ]; then
