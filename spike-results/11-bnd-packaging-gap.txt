@@ -1,0 +1,296 @@
+=== kubernetes-client-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-client/target/kubernetes-client-999-SNAPSHOT.jar
+kubernetes.client.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== kubernetes-client-api-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+Unable to derive module descriptor for: kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT.jar
+kubernetes.client.api.999.SNAPSHOT: Invalid module name: '999' is not a Java identifier
+
+=== kubernetes-httpclient-jdk-999-SNAPSHOT.jar ===
+NO module-info.class (automatic module)
+No module descriptor found. Derived automatic module.
+contains io.fabric8.kubernetes.client.jdkhttp
+io.fabric8.kubernetes.client.jdkhttp automatic
+provides io.fabric8.kubernetes.client.http.HttpClient$Factory with io.fabric8.kubernetes.client.jdkhttp.JdkHttpClientFactory
+requires java.base mandated
+
+
+## Where the descriptor actually landed
+
+httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar
+httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT.jar
+kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT-bundle.jar
+kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT.jar
+kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT-tests.jar
+kubernetes-client/target/kubernetes-client-999-SNAPSHOT-bundle.jar
+kubernetes-client/target/kubernetes-client-999-SNAPSHOT.jar
+kubernetes-client/target/kubernetes-client-999-SNAPSHOT-tests.jar
+
+=== kubernetes-client-999-SNAPSHOT-bundle.jar ===
+HAS module-info.class
+io.fabric8.kubernetes.client@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-client/target/kubernetes-client-999-SNAPSHOT-bundle.jar!/module-info.class open
+exports io.fabric8.kubernetes.client
+exports io.fabric8.kubernetes.client.dsl
+exports io.fabric8.kubernetes.client.dsl.base
+exports io.fabric8.kubernetes.client.dsl.internal
+exports io.fabric8.kubernetes.client.dsl.internal.apps.v1
+exports io.fabric8.kubernetes.client.dsl.internal.batch.v1
+exports io.fabric8.kubernetes.client.dsl.internal.certificates.v1
+exports io.fabric8.kubernetes.client.dsl.internal.certificates.v1beta1
+exports io.fabric8.kubernetes.client.dsl.internal.core.v1
+exports io.fabric8.kubernetes.client.dsl.internal.extensions.v1beta1
+exports io.fabric8.kubernetes.client.dsl.internal.uploadable
+exports io.fabric8.kubernetes.client.extended.leaderelection
+exports io.fabric8.kubernetes.client.extended.leaderelection.resourcelock
+exports io.fabric8.kubernetes.client.extended.run
+exports io.fabric8.kubernetes.client.extension
+exports io.fabric8.kubernetes.client.http
+exports io.fabric8.kubernetes.client.impl
+exports io.fabric8.kubernetes.client.informers
+exports io.fabric8.kubernetes.client.informers.cache
+exports io.fabric8.kubernetes.client.informers.impl
+exports io.fabric8.kubernetes.client.informers.impl.cache
+exports io.fabric8.kubernetes.client.internal
+exports io.fabric8.kubernetes.client.lib
+exports io.fabric8.kubernetes.client.osgi
+exports io.fabric8.kubernetes.client.readiness
+exports io.fabric8.kubernetes.client.utils
+exports io.fabric8.kubernetes.client.utils.internal
+exports io.fabric8.kubernetes.internal
+requires com.fasterxml.jackson.annotation transitive
+requires jackson-core transitive
+requires jackson-databind transitive
+requires jackson-dataformat-yaml
+requires jackson-datatype-jsr310
+requires java.base transitive
+requires kubernetes-model-admissionregistration transitive
+requires kubernetes-model-apiextensions transitive
+requires kubernetes-model-apps transitive
+requires kubernetes-model-autoscaling transitive
+requires kubernetes-model-batch transitive
+requires kubernetes-model-certificates transitive
+requires kubernetes-model-common transitive
+requires kubernetes-model-coordination transitive
+requires kubernetes-model-core transitive
+requires kubernetes-model-discovery transitive
+requires kubernetes-model-events transitive
+requires kubernetes-model-extensions transitive
+requires kubernetes-model-flowcontrol transitive
+requires kubernetes-model-metrics transitive
+requires kubernetes-model-networking transitive
+requires kubernetes-model-node transitive
+requires kubernetes-model-policy transitive
+requires kubernetes-model-rbac transitive
+requires kubernetes-model-resource transitive
+requires kubernetes-model-scheduling transitive
+requires kubernetes-model-storageclass transitive
+requires org.apache.commons.compress
+requires org.snakeyaml.engine
+requires slf4j-api transitive
+requires zjsonpatch
+
+=== kubernetes-client-api-999-SNAPSHOT-bundle.jar ===
+HAS module-info.class
+io.fabric8.kubernetes.client.api@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT-bundle.jar!/module-info.class open
+exports io.fabric8.kubernetes.client
+exports io.fabric8.kubernetes.client.dsl
+exports io.fabric8.kubernetes.client.dsl.base
+exports io.fabric8.kubernetes.client.extended.leaderelection
+exports io.fabric8.kubernetes.client.extended.leaderelection.resourcelock
+exports io.fabric8.kubernetes.client.extended.run
+exports io.fabric8.kubernetes.client.extension
+exports io.fabric8.kubernetes.client.http
+exports io.fabric8.kubernetes.client.informers
+exports io.fabric8.kubernetes.client.informers.cache
+exports io.fabric8.kubernetes.client.internal
+exports io.fabric8.kubernetes.client.lib
+exports io.fabric8.kubernetes.client.readiness
+exports io.fabric8.kubernetes.client.utils
+exports io.fabric8.kubernetes.internal
+requires com.fasterxml.jackson.annotation transitive
+requires jackson-core transitive
+requires jackson-databind transitive
+requires jackson-dataformat-yaml
+requires jackson-datatype-jsr310
+requires java.base transitive
+requires kubernetes-model-admissionregistration transitive
+requires kubernetes-model-apiextensions transitive
+requires kubernetes-model-apps transitive
+requires kubernetes-model-autoscaling transitive
+requires kubernetes-model-batch transitive
+requires kubernetes-model-certificates transitive
+requires kubernetes-model-common transitive
+requires kubernetes-model-coordination transitive
+requires kubernetes-model-core transitive
+requires kubernetes-model-discovery transitive
+requires kubernetes-model-events transitive
+requires kubernetes-model-extensions transitive
+requires kubernetes-model-flowcontrol transitive
+requires kubernetes-model-metrics transitive
+requires kubernetes-model-networking transitive
+requires kubernetes-model-node transitive
+requires kubernetes-model-policy transitive
+requires kubernetes-model-rbac transitive
+requires kubernetes-model-resource transitive
+requires kubernetes-model-scheduling transitive
+requires kubernetes-model-storageclass transitive
+requires org.snakeyaml.engine
+requires slf4j-api transitive
+
+=== kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar ===
+HAS module-info.class
+io.fabric8.kubernetes.client.jdkhttp@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/httpclient-jdk/target/kubernetes-httpclient-jdk-999-SNAPSHOT-bundle.jar!/module-info.class open
+exports io.fabric8.kubernetes.client.jdkhttp
+requires java.base
+requires java.net.http
+requires kubernetes-client-api transitive
+requires slf4j-api
+
+
+## Consumers of the -bundle classifier (cost of converting to packaging=bundle)
+
+platforms/karaf/features/src/main/resources/feature.xml:65:    <bundle>mvn:io.fabric8/kubernetes-httpclient-jdk/${project.version}/jar/bundle</bundle>
+platforms/karaf/features/src/main/resources/feature.xml:66:    <bundle>mvn:io.fabric8/kubernetes-client/${project.version}/jar/bundle</bundle>
+platforms/karaf/features/src/main/resources/feature.xml:71:    <bundle>mvn:io.fabric8/openshift-client/${project.version}/jar/bundle</bundle>
+
+platforms/karaf/itests/pom.xml:41:      <classifier>bundle</classifier>
+platforms/karaf/itests/pom.xml-42-    </dependency>
+platforms/karaf/itests/pom.xml-43-    <dependency>
+--
+platforms/karaf/itests/pom.xml:47:      <classifier>bundle</classifier>
+platforms/karaf/itests/pom.xml-48-    </dependency>
+platforms/karaf/itests/pom.xml-49-
+
+poms declaring the bundle classifier: 10
+
+## Remedy prototype: kubernetes-client-api as packaging=bundle
+
+kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT.jar
+kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT-tests.jar
+
+=== kubernetes-client-api-999-SNAPSHOT.jar ===
+HAS module-info.class
+io.fabric8.kubernetes.client.api@999.0.0.SNAPSHOT jar:file:///home/austek/Workspace/utils/kubernetes-client/.claude/worktrees/jpms-spike/kubernetes-client-api/target/kubernetes-client-api-999-SNAPSHOT.jar!/module-info.class open
+exports io.fabric8.kubernetes.client
+exports io.fabric8.kubernetes.client.dsl
+exports io.fabric8.kubernetes.client.dsl.base
+exports io.fabric8.kubernetes.client.extended.leaderelection
+exports io.fabric8.kubernetes.client.extended.leaderelection.resourcelock
+exports io.fabric8.kubernetes.client.extended.run
+exports io.fabric8.kubernetes.client.extension
+exports io.fabric8.kubernetes.client.http
+exports io.fabric8.kubernetes.client.informers
+exports io.fabric8.kubernetes.client.informers.cache
+exports io.fabric8.kubernetes.client.internal
+exports io.fabric8.kubernetes.client.lib
+exports io.fabric8.kubernetes.client.readiness
+exports io.fabric8.kubernetes.client.utils
+exports io.fabric8.kubernetes.internal
+requires com.fasterxml.jackson.annotation transitive
+requires jackson-core transitive
+requires jackson-databind transitive
+requires jackson-dataformat-yaml
+requires jackson-datatype-jsr310
+requires java.base transitive
+requires kubernetes-model-admissionregistration transitive
+requires kubernetes-model-apiextensions transitive
+requires kubernetes-model-apps transitive
+requires kubernetes-model-autoscaling transitive
+requires kubernetes-model-batch transitive
+requires kubernetes-model-certificates transitive
+requires kubernetes-model-common transitive
+requires kubernetes-model-coordination transitive
+requires kubernetes-model-core transitive
+requires kubernetes-model-discovery transitive
+requires kubernetes-model-events transitive
+requires kubernetes-model-extensions transitive
+requires kubernetes-model-flowcontrol transitive
+requires kubernetes-model-metrics transitive
+requires kubernetes-model-networking transitive
+requires kubernetes-model-node transitive
+requires kubernetes-model-policy transitive
+requires kubernetes-model-rbac transitive
+requires kubernetes-model-resource transitive
+requires kubernetes-model-scheduling transitive
+requires kubernetes-model-storageclass transitive
+requires org.snakeyaml.engine
+requires slf4j-api transitive
+
+
+## Verdict
+
+### Supporting counts
+
+$ git show da342969c4 --name-only --pretty=format: | grep '/pom.xml$' | wc -l
+74
+
+$ git show da342969c4 --name-only --pretty=format: | grep '/pom.xml$' | xargs grep -l '<packaging>bundle</packaging>' | wc -l
+59
+
+$ git show da342969c4 --name-only --pretty=format: | grep '/pom.xml$' | xargs grep -l '<classifier>bundle</classifier>' | wc -l
+9
+
+$ git show da342969c4 --name-only --pretty=format: | grep '/pom.xml$' | xargs grep -l '<classifier>bundle</classifier>' | sort
+httpclient-jdk/pom.xml
+httpclient-jetty/pom.xml
+httpclient-okhttp/pom.xml
+httpclient-vertx-5/pom.xml
+httpclient-vertx/pom.xml
+kubernetes-client-api/pom.xml
+kubernetes-client/pom.xml
+openshift-client-api/pom.xml
+openshift-client/pom.xml
+
+$ git show da342969c4 --name-only --pretty=format: | grep '/pom.xml$' | xargs grep -L '<packaging>bundle</packaging>' | xargs grep -L '<classifier>bundle</classifier>' | sort
+extensions/open-virtual-network/client/pom.xml
+junit/kube-api-test/client-inject/pom.xml
+junit/kube-api-test/core/pom.xml
+junit/kubernetes-junit-jupiter/pom.xml
+junit/kubernetes-server-mock/pom.xml
+junit/mockwebserver/pom.xml
+
+### Plain-language verdict
+
+Of the 74 published modules, the Task 2 root-pom bnd config reaches 59 with no further
+change: every module that already declares packaging=bundle gets its main jar's
+module-info injected for free, because bnd's Jar object for that execution IS the main
+artifact.
+
+It buys nothing, unmodified, for the other 15 packaging=jar modules. Of those 15,
+9 are core runtime artifacts that DO run bnd -- all five httpclient implementations
+(httpclient-jdk, httpclient-jetty, httpclient-okhttp, httpclient-vertx, httpclient-vertx-5)
+plus kubernetes-client-api, kubernetes-client, openshift-client-api and openshift-client --
+but bnd's Jar object for them is the classified -bundle execution, not the main jar
+consumers actually depend on. Converting packaging=jar to packaging=bundle fixes this:
+Step 6's prototype on kubernetes-client-api shows the main jar gaining a real
+"open module io.fabric8.kubernetes.client.api" descriptor with its exports and transitive
+requires graph intact, and the -bundle classified jar disappearing from target/ entirely --
+one artifact does the job that took two.
+
+The remaining 6 of the 15 (junit/kube-api-test/client-inject, junit/kube-api-test/core,
+junit/kubernetes-junit-jupiter, junit/kubernetes-server-mock, junit/mockwebserver, and
+extensions/open-virtual-network/client) run no maven-bundle-plugin execution at all, in
+any form. The packaging=bundle remedy is irrelevant to them; they are simply outside bnd's
+reach regardless of packaging and would need a bnd execution added from scratch, or a
+different mechanism (moditect), to get a descriptor.
+
+The cost of applying the remedy to the 9 core artifacts: packaging=bundle is a
+consumer-visible change to the published artifact's Maven packaging, and it removes a
+currently-published classified artifact. Concretely, platforms/karaf/features/src/main/
+resources/feature.xml resolves three of the nine (kubernetes-httpclient-jdk,
+kubernetes-client, openshift-client) via mvn:.../${project.version}/jar/bundle coordinates
+that assume the classified jar exists, and platforms/karaf/itests/pom.xml declares two
+<classifier>bundle</classifier> dependencies on the same assumption. Both would need
+updating (dropping the classifier / the /bundle suffix) before any of the 9 could convert.
+10 poms in the whole repo declare <classifier>bundle</classifier> today: the 9 producers
+plus this one consumer -- not the 11 the brief assumed; recount before relying on that
+figure elsewhere in the spike.
+
+Net: bnd-with-central-config, unmodified, silently does nothing for the main jar of the
+three packaging=jar modules in this task's slice (and six of the other packaging=jar
+modules get nothing under any packaging). Fixing the nine core artifacts is a real,
+demonstrated fix, but it is a packaging change with two concrete downstream call sites to
+update, not a config-only tweak -- it cannot ride inside a mechanism spike and would need
+its own review.
